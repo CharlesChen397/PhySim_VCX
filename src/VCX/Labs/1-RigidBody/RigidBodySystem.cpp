@@ -198,8 +198,8 @@ namespace VCX::Labs::RigidBody {
             solveContactsSchur(dt);
         } else {
             solveContactsSequential(dt);
+            solveJointsSequential(dt);
         }
-        solveJointsSequential(dt);
         solvePositionCorrection();
 
         for (auto & body : Bodies) {
@@ -361,7 +361,71 @@ namespace VCX::Labs::RigidBody {
     }
 
     void RigidBodySystem::solveContactsSchur(float dt) {
-        int const m = static_cast<int>(Contacts.size());
+        struct ConstraintRow {
+            int             A { -1 };
+            int             B { -1 };
+            Eigen::Vector3f N { 0.f, 1.f, 0.f };
+            Eigen::Vector3f RA { 0.f, 0.f, 0.f };
+            Eigen::Vector3f RB { 0.f, 0.f, 0.f };
+            float           Bias { 0.f };
+            bool            Unilateral { false };
+            Eigen::Vector3f Point { 0.f, 0.f, 0.f };
+        };
+
+        std::vector<ConstraintRow> rows;
+        rows.reserve(Contacts.size() + Joints.size() * 3);
+
+        for (auto const & c : Contacts) {
+            auto const &          a    = Bodies[c.A];
+            auto const &          b0   = Bodies[c.B];
+            Eigen::Vector3f const ra   = c.Point - a.X;
+            Eigen::Vector3f const rb   = c.Point - b0.X;
+            Eigen::Vector3f const va   = a.V + a.W.cross(ra);
+            Eigen::Vector3f const vb   = b0.V + b0.W.cross(rb);
+            float const           vn   = (vb - va).dot(c.Normal);
+            float const           bias = vn - BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
+            rows.push_back(ConstraintRow {
+                .A          = c.A,
+                .B          = c.B,
+                .N          = c.Normal,
+                .RA         = ra,
+                .RB         = rb,
+                .Bias       = bias,
+                .Unilateral = true,
+                .Point      = c.Point,
+            });
+        }
+
+        for (auto const & joint : Joints) {
+            auto const &          a   = Bodies[joint.A];
+            auto const &          b   = Bodies[joint.B];
+            Eigen::Vector3f const ra  = a.Q * joint.LocalAnchorA;
+            Eigen::Vector3f const rb  = b.Q * joint.LocalAnchorB;
+            Eigen::Vector3f const pa  = a.X + ra;
+            Eigen::Vector3f const pb  = b.X + rb;
+            Eigen::Vector3f const err = pb - pa;
+            Eigen::Vector3f const va  = a.V + a.W.cross(ra);
+            Eigen::Vector3f const vb  = b.V + b.W.cross(rb);
+            Eigen::Vector3f const rv  = vb - va;
+
+            for (int axis = 0; axis < 3; ++axis) {
+                Eigen::Vector3f n = Eigen::Vector3f::Zero();
+                n[axis]           = 1.f;
+                float const bias  = rv.dot(n) + 0.2f * err.dot(n) / std::max(dt, 1e-6f);
+                rows.push_back(ConstraintRow {
+                    .A          = joint.A,
+                    .B          = joint.B,
+                    .N          = n,
+                    .RA         = ra,
+                    .RB         = rb,
+                    .Bias       = bias,
+                    .Unilateral = false,
+                    .Point      = 0.5f * (pa + pb),
+                });
+            }
+        }
+
+        int const m = static_cast<int>(rows.size());
         if (m == 0) {
             return;
         }
@@ -369,33 +433,8 @@ namespace VCX::Labs::RigidBody {
         Eigen::MatrixXf A = Eigen::MatrixXf::Zero(m, m);
         Eigen::VectorXf b = Eigen::VectorXf::Zero(m);
 
-        struct JacobianRow {
-            int             A;
-            int             B;
-            Eigen::Vector3f N;
-            Eigen::Vector3f RA;
-            Eigen::Vector3f RB;
-        };
-
-        std::vector<JacobianRow> rows;
-        rows.reserve(m);
-
         for (int i = 0; i < m; ++i) {
-            Contact const & c = Contacts[i];
-            JacobianRow     row {
-                .A  = c.A,
-                .B  = c.B,
-                .N  = c.Normal,
-                .RA = c.Point - Bodies[c.A].X,
-                .RB = c.Point - Bodies[c.B].X,
-            };
-            rows.push_back(row);
-
-            Eigen::Vector3f const va   = Bodies[c.A].V + Bodies[c.A].W.cross(row.RA);
-            Eigen::Vector3f const vb   = Bodies[c.B].V + Bodies[c.B].W.cross(row.RB);
-            float const           vn   = (vb - va).dot(row.N);
-            float const           bias = -BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
-            b(i)                       = vn + bias;
+            b(i) = rows[i].Bias;
         }
 
         for (int i = 0; i < m; ++i) {
@@ -432,12 +471,16 @@ namespace VCX::Labs::RigidBody {
 
         Eigen::VectorXf lambda = A.ldlt().solve(-b);
         for (int i = 0; i < m; ++i) {
-            float const           li      = std::max(0.f, lambda(i));
-            Contact const &       c       = Contacts[i];
-            Eigen::Vector3f const impulse = li * c.Normal;
-            Bodies[c.A].ApplyImpulse(c.Point, -impulse);
-            Bodies[c.B].ApplyImpulse(c.Point, impulse);
-            setNormalImpulseCache(c.A, c.B, li);
+            float li = lambda(i);
+            if (rows[i].Unilateral) {
+                li = std::max(0.f, li);
+            }
+            Eigen::Vector3f const impulse = li * rows[i].N;
+            Bodies[rows[i].A].ApplyImpulse(rows[i].Point, -impulse);
+            Bodies[rows[i].B].ApplyImpulse(rows[i].Point, impulse);
+            if (rows[i].Unilateral) {
+                setNormalImpulseCache(rows[i].A, rows[i].B, li);
+            }
         }
     }
 
