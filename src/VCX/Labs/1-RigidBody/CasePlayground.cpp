@@ -96,9 +96,9 @@ namespace VCX::Labs::RigidBody {
             stepSimulation(Engine::GetDeltaTime());
         }
 
-        std::vector<glm::vec3> positions;
-        std::vector<std::uint32_t>   triangles;
-        std::vector<std::uint32_t>   lines;
+        std::vector<glm::vec3>     positions;
+        std::vector<std::uint32_t> triangles;
+        std::vector<std::uint32_t> lines;
 
         for (auto const & body : _system.Bodies) {
             MeshData            mesh = BuildBodyMesh(body);
