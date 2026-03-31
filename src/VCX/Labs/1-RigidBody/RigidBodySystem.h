@@ -72,6 +72,9 @@ namespace VCX::Labs::RigidBody {
         int   PositionIterations { 3 };
         float BaumgarteBeta { 0.2f };
         float PenetrationSlop { 1e-3f };
+        float RestitutionVelocityThreshold { 0.6f };
+        float RestingLinearThreshold { 0.08f };
+        float RestingAngularThreshold { 0.12f };
 
         bool EnableCCD { true };
         bool EnableWarmStart { true };
@@ -103,6 +106,7 @@ namespace VCX::Labs::RigidBody {
         void solveContactsSchur(float dt);
         void solvePositionCorrection();
         void solveJointsSequential(float dt);
+        void stabilizeRestingContacts();
 
         float getNormalImpulseCache(int a, int b) const;
         void  setNormalImpulseCache(int a, int b, float impulse);

@@ -1,6 +1,7 @@
 #include "Labs/1-RigidBody/RigidBodySystem.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 
 #include <fcl/geometry/shape/box.h>
@@ -201,6 +202,7 @@ namespace VCX::Labs::RigidBody {
             solveJointsSequential(dt);
         }
         solvePositionCorrection();
+        stabilizeRestingContacts();
 
         for (auto & body : Bodies) {
             body.ClearAccumulators();
@@ -335,6 +337,7 @@ namespace VCX::Labs::RigidBody {
 
                 float const vn   = rv.dot(c.Normal);
                 float const bias = -BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
+                float const restitution = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
 
                 Eigen::Vector3f const iRaN    = a.GetWorldInvInertia() * ra.cross(c.Normal);
                 Eigen::Vector3f const iRbN    = b.GetWorldInvInertia() * rb.cross(c.Normal);
@@ -343,17 +346,33 @@ namespace VCX::Labs::RigidBody {
                     continue;
                 }
 
-                float jn = -(1.f + c.Restitution) * vn + bias;
+                float jn = -(vn + bias) - restitution * vn;
                 jn /= effMass;
-
-                if (EnableWarmStart && iter == 0) {
-                    jn = std::max(jn, -getNormalImpulseCache(c.A, c.B));
-                }
                 jn = std::max(0.f, jn);
 
-                Eigen::Vector3f const impulse = jn * c.Normal;
-                a.ApplyImpulse(c.Point, -impulse);
-                b.ApplyImpulse(c.Point, impulse);
+                Eigen::Vector3f const normalImpulse = jn * c.Normal;
+                a.ApplyImpulse(c.Point, -normalImpulse);
+                b.ApplyImpulse(c.Point, normalImpulse);
+
+                Eigen::Vector3f const va2 = a.V + a.W.cross(ra);
+                Eigen::Vector3f const vb2 = b.V + b.W.cross(rb);
+                Eigen::Vector3f const rv2 = vb2 - va2;
+                Eigen::Vector3f       vt  = rv2 - rv2.dot(c.Normal) * c.Normal;
+                float const           vtNorm = vt.norm();
+                if (vtNorm > 1e-6f) {
+                    Eigen::Vector3f const tangent = vt / vtNorm;
+                    Eigen::Vector3f const iRaT    = a.GetWorldInvInertia() * ra.cross(tangent);
+                    Eigen::Vector3f const iRbT    = b.GetWorldInvInertia() * rb.cross(tangent);
+                    float const           effMassT = a.InvMass + b.InvMass + tangent.dot(iRaT.cross(ra) + iRbT.cross(rb));
+                    if (effMassT > 1e-8f) {
+                        float       jt = -rv2.dot(tangent) / effMassT;
+                        float const mu = std::sqrt(std::max(0.f, a.Friction * b.Friction));
+                        jt             = std::clamp(jt, -mu * jn, mu * jn);
+                        Eigen::Vector3f const tangentImpulse = jt * tangent;
+                        a.ApplyImpulse(c.Point, -tangentImpulse);
+                        b.ApplyImpulse(c.Point, tangentImpulse);
+                    }
+                }
 
                 setNormalImpulseCache(c.A, c.B, jn);
             }
@@ -383,7 +402,8 @@ namespace VCX::Labs::RigidBody {
             Eigen::Vector3f const va   = a.V + a.W.cross(ra);
             Eigen::Vector3f const vb   = b0.V + b0.W.cross(rb);
             float const           vn   = (vb - va).dot(c.Normal);
-            float const           bias = vn - BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
+            float const restitution = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
+            float const bias = (1.f + restitution) * vn - BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
             rows.push_back(ConstraintRow {
                 .A          = c.A,
                 .B          = c.B,
@@ -542,6 +562,43 @@ namespace VCX::Labs::RigidBody {
                 }
                 if (! b.Fixed) {
                     b.X += b.InvMass * corr;
+                }
+            }
+        }
+    }
+
+    void RigidBodySystem::stabilizeRestingContacts() {
+        if (Contacts.empty()) {
+            return;
+        }
+
+        std::vector<bool> touchStatic(Bodies.size(), false);
+        for (auto const & c : Contacts) {
+            bool const aStatic = Bodies[c.A].Fixed;
+            bool const bStatic = Bodies[c.B].Fixed;
+            if (aStatic == bStatic) {
+                continue;
+            }
+            int const dynamicId = aStatic ? c.B : c.A;
+            touchStatic[dynamicId] = true;
+        }
+
+        for (std::size_t i = 0; i < Bodies.size(); ++i) {
+            auto & body = Bodies[i];
+            if (body.Fixed || !touchStatic[i]) {
+                continue;
+            }
+
+            float const linearSpeed  = body.V.norm();
+            float const angularSpeed = body.W.norm();
+
+            if (linearSpeed < 2.f * RestingLinearThreshold && angularSpeed < 2.f * RestingAngularThreshold) {
+                if (std::abs(body.V.y()) < RestitutionVelocityThreshold) {
+                    body.V.y() = 0.f;
+                }
+                if (linearSpeed < RestingLinearThreshold && angularSpeed < RestingAngularThreshold) {
+                    body.V.setZero();
+                    body.W.setZero();
                 }
             }
         }

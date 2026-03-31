@@ -51,6 +51,9 @@ namespace VCX::Labs::RigidBody {
             ImGui::SliderInt("Position Iterations", &_system.PositionIterations, 1, 10);
             ImGui::SliderFloat("Baumgarte Beta", &_system.BaumgarteBeta, 0.f, 0.8f);
             ImGui::SliderFloat("Penetration Slop", &_system.PenetrationSlop, 1e-4f, 2e-2f, "%.4f", ImGuiSliderFlags_Logarithmic);
+            ImGui::SliderFloat("Restitution Threshold", &_system.RestitutionVelocityThreshold, 0.05f, 2.0f);
+            ImGui::SliderFloat("Resting Linear Threshold", &_system.RestingLinearThreshold, 0.01f, 0.25f);
+            ImGui::SliderFloat("Resting Angular Threshold", &_system.RestingAngularThreshold, 0.01f, 0.5f);
         }
 
         if (ImGui::CollapsingHeader("Interaction", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -61,24 +64,36 @@ namespace VCX::Labs::RigidBody {
             ImGui::Checkbox("Auto Kick On Reset", &_autoApplyKick);
             ImGui::Checkbox("Show Wireframe", &_showWireframe);
 
-            if (ImGui::Button("Impulse +X") && _selectedBody < static_cast<int>(_system.Bodies.size())) {
+            if (_selectedBody < static_cast<int>(_system.Bodies.size())) {
                 auto & b = _system.Bodies[_selectedBody];
-                b.ApplyImpulse(b.X, Eigen::Vector3f(_userImpulse, 0.f, 0.f));
+                ImGui::SeparatorText("Velocity Controls (Req1)");
+                ImGui::SliderFloat("Linear Vx", &b.V.x(), -12.f, 12.f);
+                ImGui::SliderFloat("Linear Vy", &b.V.y(), -12.f, 12.f);
+                ImGui::SliderFloat("Linear Vz", &b.V.z(), -12.f, 12.f);
+                ImGui::SliderFloat("Angular Wx", &b.W.x(), -20.f, 20.f);
+                ImGui::SliderFloat("Angular Wy", &b.W.y(), -20.f, 20.f);
+                ImGui::SliderFloat("Angular Wz", &b.W.z(), -20.f, 20.f);
             }
+
+            auto applySelectedImpulse = [&](Eigen::Vector3f const & dir) {
+                if (_selectedBody >= static_cast<int>(_system.Bodies.size())) {
+                    return;
+                }
+                auto & b = _system.Bodies[_selectedBody];
+                b.ApplyImpulse(b.X, _userImpulse * dir);
+            };
+
+            if (ImGui::Button("Impulse +X")) applySelectedImpulse(Eigen::Vector3f(1.f, 0.f, 0.f));
             ImGui::SameLine();
-            if (ImGui::Button("Impulse -X") && _selectedBody < static_cast<int>(_system.Bodies.size())) {
-                auto & b = _system.Bodies[_selectedBody];
-                b.ApplyImpulse(b.X, Eigen::Vector3f(-_userImpulse, 0.f, 0.f));
-            }
-            if (ImGui::Button("Impulse +Y") && _selectedBody < static_cast<int>(_system.Bodies.size())) {
-                auto & b = _system.Bodies[_selectedBody];
-                b.ApplyImpulse(b.X, Eigen::Vector3f(0.f, _userImpulse, 0.f));
-            }
+            if (ImGui::Button("Impulse -X")) applySelectedImpulse(Eigen::Vector3f(-1.f, 0.f, 0.f));
+
+            if (ImGui::Button("Impulse +Y")) applySelectedImpulse(Eigen::Vector3f(0.f, 1.f, 0.f));
             ImGui::SameLine();
-            if (ImGui::Button("Impulse +Z") && _selectedBody < static_cast<int>(_system.Bodies.size())) {
-                auto & b = _system.Bodies[_selectedBody];
-                b.ApplyImpulse(b.X, Eigen::Vector3f(0.f, 0.f, _userImpulse));
-            }
+            if (ImGui::Button("Impulse -Y")) applySelectedImpulse(Eigen::Vector3f(0.f, -1.f, 0.f));
+
+            if (ImGui::Button("Impulse +Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, 1.f));
+            ImGui::SameLine();
+            if (ImGui::Button("Impulse -Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, -1.f));
         }
 
         ImGui::Text("Bodies: %d", static_cast<int>(_system.Bodies.size()));
@@ -162,6 +177,7 @@ namespace VCX::Labs::RigidBody {
             if (ImGui::IsKeyPressed(ImGuiKey_I)) body.ApplyImpulse(body.X, Eigen::Vector3f(0.f, 0.f, -_userImpulse));
             if (ImGui::IsKeyPressed(ImGuiKey_K)) body.ApplyImpulse(body.X, Eigen::Vector3f(0.f, 0.f, _userImpulse));
             if (ImGui::IsKeyPressed(ImGuiKey_U)) body.ApplyImpulse(body.X, Eigen::Vector3f(0.f, _userImpulse, 0.f));
+            if (ImGui::IsKeyPressed(ImGuiKey_O)) body.ApplyImpulse(body.X, Eigen::Vector3f(0.f, -_userImpulse, 0.f));
         }
     }
 
@@ -244,10 +260,15 @@ namespace VCX::Labs::RigidBody {
         _system.EnableCCD             = false;
         _system.EnableSchurComplement = false;
 
-        int a               = _system.AddBox(Eigen::Vector3f(0.7f, 0.7f, 1.6f), Eigen::Vector3f(-1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        int b               = _system.AddBox(Eigen::Vector3f(0.7f, 1.6f, 0.7f), Eigen::Vector3f(1.8f, -0.4f, 0.f), Eigen::Quaternionf(0.94f, 0.12f, 0.28f, 0.15f).normalized(), 1.0f, false);
-        _system.Bodies[a].V = Eigen::Vector3f(1.3f, 0.f, 0.f);
-        _system.Bodies[b].V = Eigen::Vector3f(-1.3f, 0.f, 0.f);
+        constexpr float    kDegToRad = 0.01745329252f;
+        Eigen::Quaternionf qa        = Eigen::AngleAxisf(20.f * kDegToRad, Eigen::Vector3f::UnitY()) * Eigen::AngleAxisf(12.f * kDegToRad, Eigen::Vector3f::UnitX());
+        Eigen::Quaternionf qb        = Eigen::AngleAxisf(-20.f * kDegToRad, Eigen::Vector3f::UnitY()) * Eigen::AngleAxisf(-12.f * kDegToRad, Eigen::Vector3f::UnitX()) * Eigen::AngleAxisf(90.f * kDegToRad, Eigen::Vector3f::UnitZ());
+        int                a         = _system.AddBox(Eigen::Vector3f(2.6f, 0.28f, 0.28f), Eigen::Vector3f(-2.1f, 0.15f, 0.45f), qa.normalized(), 1.0f, false);
+        int                b         = _system.AddBox(Eigen::Vector3f(2.6f, 0.28f, 0.28f), Eigen::Vector3f(2.1f, -0.15f, -0.45f), qb.normalized(), 1.0f, false);
+        _system.Bodies[a].V          = Eigen::Vector3f(1.9f, 0.f, 0.f);
+        _system.Bodies[b].V          = Eigen::Vector3f(-1.9f, 0.f, 0.f);
+        _system.Bodies[a].W          = Eigen::Vector3f(0.f, 0.2f, 0.f);
+        _system.Bodies[b].W          = Eigen::Vector3f(0.f, -0.2f, 0.f);
     }
 
     void CasePlayground::initDoubleVertexFace() {
