@@ -316,7 +316,8 @@ namespace VCX::Labs::RigidBody {
                     contact.Point       = c.pos;
                     contact.Normal      = c.normal.normalized();
                     contact.Penetration = c.penetration_depth;
-                    contact.Restitution = 0.5f * (Bodies[i].Restitution + Bodies[j].Restitution);
+                    // Use pair restitution that does not inflate bounce when one side is inelastic.
+                    contact.Restitution = std::min(Bodies[i].Restitution, Bodies[j].Restitution);
                     Contacts.push_back(contact);
                 }
             }
@@ -358,7 +359,12 @@ namespace VCX::Labs::RigidBody {
                 }
 
                 float jn = (-(1.f + restitution) * vn + biasVel) / effMass;
-                jn = std::max(0.f, jn);
+                jn       = std::max(0.f, jn);
+
+                // Friction should not be scaled by the penetration-bias part of normal impulse,
+                // otherwise deep contacts can receive unrealistically large tangential kicks.
+                float const biasImpulsePart = biasVel / effMass;
+                float const frictionNormal  = std::max(0.f, jn - biasImpulsePart);
 
                 Eigen::Vector3f const normalImpulse = jn * c.Normal;
                 a.ApplyImpulse(c.Point, -normalImpulse);
@@ -377,7 +383,8 @@ namespace VCX::Labs::RigidBody {
                     if (effMassT > 1e-8f) {
                         float       jt                       = -rv2.dot(tangent) / effMassT;
                         float const mu                       = std::sqrt(std::max(0.f, a.Friction * b.Friction));
-                        jt                                   = std::clamp(jt, -mu * jn, mu * jn);
+                        float const maxFrictionImpulse       = mu * frictionNormal;
+                        jt                                   = std::clamp(jt, -maxFrictionImpulse, maxFrictionImpulse);
                         Eigen::Vector3f const tangentImpulse = jt * tangent;
                         a.ApplyImpulse(c.Point, -tangentImpulse);
                         b.ApplyImpulse(c.Point, tangentImpulse);
@@ -405,13 +412,13 @@ namespace VCX::Labs::RigidBody {
         rows.reserve(Contacts.size() + Joints.size() * 3);
 
         for (auto const & c : Contacts) {
-            auto const &          a           = Bodies[c.A];
-            auto const &          b0          = Bodies[c.B];
-            Eigen::Vector3f const ra          = c.Point - a.X;
-            Eigen::Vector3f const rb          = c.Point - b0.X;
-            Eigen::Vector3f const va          = a.V + a.W.cross(ra);
-            Eigen::Vector3f const vb          = b0.V + b0.W.cross(rb);
-            float const           vn          = (vb - va).dot(c.Normal);
+            auto const &          a                = Bodies[c.A];
+            auto const &          b0               = Bodies[c.B];
+            Eigen::Vector3f const ra               = c.Point - a.X;
+            Eigen::Vector3f const rb               = c.Point - b0.X;
+            Eigen::Vector3f const va               = a.V + a.W.cross(ra);
+            Eigen::Vector3f const vb               = b0.V + b0.W.cross(rb);
+            float const           vn               = (vb - va).dot(c.Normal);
             float const           penetrationError = std::max(0.f, c.Penetration - PenetrationSlop);
             float const           restitution      = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
             float const           biasVel          = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));

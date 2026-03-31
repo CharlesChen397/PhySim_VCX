@@ -332,6 +332,21 @@ namespace VCX::Labs::RigidBody {
         _b1KickPending = false;
         _b1KickBodyId  = -1;
 
+        // Reset solver knobs to a deterministic baseline before each preset.
+        _system.Gravity                      = 0.f;
+        _system.EnableCCD                    = true;
+        _system.EnableSchurComplement        = false;
+        _system.EnableWarmStart              = true;
+        _system.VelocityIterations           = 12;
+        _system.PositionIterations           = 3;
+        _system.BaumgarteBeta                = 0.2f;
+        _system.MaxBiasVelocity              = 1.5f;
+        _system.PenetrationSlop              = 1e-3f;
+        _system.RestitutionVelocityThreshold = 0.6f;
+        _system.RestingLinearThreshold       = 0.08f;
+        _system.RestingAngularThreshold      = 0.12f;
+        _system.SleepTimeThreshold           = 0.45f;
+
         switch (_preset) {
         case Preset::SingleBody:
             initSingleBody();
@@ -437,14 +452,21 @@ namespace VCX::Labs::RigidBody {
         _timeScale = 0.9f;
         _substeps  = 2;
 
-        _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(-5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const ground = _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const wallL  = _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(-5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const wallR  = _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+
+        _system.Bodies[ground].Restitution = 0.02f;
+        _system.Bodies[ground].Friction    = 0.55f;
+        _system.Bodies[wallL].Restitution  = 0.02f;
+        _system.Bodies[wallL].Friction     = 0.50f;
+        _system.Bodies[wallR].Restitution  = 0.02f;
+        _system.Bodies[wallR].Friction     = 0.50f;
 
         for (int i = 0; i < 5; ++i) {
-            int id               = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(-1.5f + 0.8f * i, 2.5f + 1.0f * i, (i % 2 == 0) ? 0.5f : -0.5f), Eigen::Quaternionf::Identity(), 1.0f, false);
-            _system.Bodies[id].Restitution = 0.06f;
-            _system.Bodies[id].Friction    = 0.75f;
+            int id                         = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(-1.5f + 0.8f * i, 2.5f + 1.0f * i, (i % 2 == 0) ? 0.5f : -0.5f), Eigen::Quaternionf::Identity(), 1.0f, false);
+            _system.Bodies[id].Restitution = 0.04f;
+            _system.Bodies[id].Friction    = 0.45f;
             _system.Bodies[id].W           = Eigen::Vector3f(0.08f * i, 0.03f, -0.05f * i);
         }
     }
@@ -492,43 +514,62 @@ namespace VCX::Labs::RigidBody {
     }
 
     void CasePlayground::initBonusStacking() {
-        _system.Gravity               = 9.8f;
-        _system.EnableCCD             = true;
-        _system.EnableSchurComplement = false;
-        _system.VelocityIterations    = 26;
-        _system.PositionIterations    = 8;
-        _system.BaumgarteBeta         = 0.12f;
-        _system.MaxBiasVelocity       = 0.9f;
-        _system.PenetrationSlop       = 2.5e-3f;
-        _system.RestitutionVelocityThreshold = 1.0f;
-        _system.RestingLinearThreshold       = 0.06f;
-        _system.RestingAngularThreshold      = 0.10f;
-        _system.SleepTimeThreshold           = 0.35f;
+        _system.Gravity                      = 9.8f;
+        _system.EnableCCD                    = true;
+        _system.EnableSchurComplement        = false;
+        _system.VelocityIterations           = 32;
+        _system.PositionIterations           = 10;
+        _system.BaumgarteBeta                = 0.08f;
+        _system.MaxBiasVelocity              = 0.55f;
+        _system.PenetrationSlop              = 3.0e-3f;
+        _system.RestitutionVelocityThreshold = 0.2f;
+        _system.RestingLinearThreshold       = 0.05f;
+        _system.RestingAngularThreshold      = 0.08f;
+        _system.SleepTimeThreshold           = 0.25f;
 
-        _timeScale = 0.8f;
-        _substeps  = 4;
+        _timeScale = 0.75f;
+        _substeps  = 5;
 
-        _system.AddBox(Eigen::Vector3f(10.f, 0.4f, 10.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const ground                   = _system.AddBox(Eigen::Vector3f(10.f, 0.4f, 10.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        _system.Bodies[ground].Restitution = 0.0f;
+        _system.Bodies[ground].Friction    = 0.65f;
         for (int i = 0; i < 6; ++i) {
-            float const y                 = -1.5f + 1.02f * i;
-            int   id                      = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(0.f, y, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+            float const y                  = -1.5f + 1.02f * i;
+            int         id                 = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(0.f, y, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
             _system.Bodies[id].Restitution = 0.0f;
-            _system.Bodies[id].Friction    = 0.88f;
+            _system.Bodies[id].Friction    = 0.62f;
             _system.Bodies[id].W.setZero();
         }
     }
 
     void CasePlayground::initBonusMixedPrimitives() {
-        _system.Gravity               = 9.8f;
-        _system.EnableCCD             = true;
-        _system.EnableSchurComplement = false;
+        _system.Gravity                      = 9.8f;
+        _system.EnableCCD                    = true;
+        _system.EnableSchurComplement        = false;
+        _system.VelocityIterations           = 24;
+        _system.PositionIterations           = 6;
+        _system.BaumgarteBeta                = 0.10f;
+        _system.MaxBiasVelocity              = 0.70f;
+        _system.PenetrationSlop              = 2.0e-3f;
+        _system.RestitutionVelocityThreshold = 0.2f;
 
-        _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        _timeScale = 0.9f;
+        _substeps  = 3;
 
-        _system.AddBox(Eigen::Vector3f(1.4f, 1.0f, 1.2f), Eigen::Vector3f(-2.f, 1.2f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
-        _system.AddSphere(0.55f, Eigen::Vector3f(0.f, 2.5f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        int c               = _system.AddCylinder(0.45f, 1.3f, Eigen::Vector3f(2.f, 3.0f, 0.f), Eigen::Quaternionf::Identity(), 1.3f, false);
-        _system.Bodies[c].W = Eigen::Vector3f(0.f, 2.f, 0.f);
+        int const ground                   = _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        _system.Bodies[ground].Restitution = 0.02f;
+        _system.Bodies[ground].Friction    = 0.55f;
+
+        int box                         = _system.AddBox(Eigen::Vector3f(1.4f, 1.0f, 1.2f), Eigen::Vector3f(-2.f, 1.2f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
+        int sph                         = _system.AddSphere(0.55f, Eigen::Vector3f(0.f, 2.5f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        int c                           = _system.AddCylinder(0.45f, 1.3f, Eigen::Vector3f(2.f, 3.0f, 0.f), Eigen::Quaternionf::Identity(), 1.3f, false);
+        _system.Bodies[box].Restitution = 0.10f;
+        _system.Bodies[box].Friction    = 0.45f;
+        _system.Bodies[sph].Restitution = 0.28f;
+        _system.Bodies[sph].Friction    = 0.25f;
+        _system.Bodies[c].Restitution   = 0.16f;
+        _system.Bodies[c].Friction      = 0.35f;
+        _system.Bodies[c].W             = Eigen::Vector3f(0.f, 1.4f, 0.f);
     }
 
     void CasePlayground::initBonusConstrainedContacts() {
