@@ -310,12 +310,25 @@ namespace VCX::Labs::RigidBody {
                 std::vector<fcl::Contact<float>> fclContacts;
                 result.getContacts(fclContacts);
                 for (auto const & c : fclContacts) {
+                    Eigen::Vector3f n = c.normal;
+                    if (n.squaredNorm() < 1e-12f) {
+                        continue;
+                    }
+                    n.normalize();
+
+                    // FCL normal direction can vary across versions/algorithms.
+                    // Force a consistent convention: normal points from body A to body B.
+                    Eigen::Vector3f const ab = Bodies[j].X - Bodies[i].X;
+                    if (ab.dot(n) < 0.f) {
+                        n = -n;
+                    }
+
                     Contact contact;
                     contact.A           = i;
                     contact.B           = j;
                     contact.Point       = c.pos;
-                    contact.Normal      = c.normal.normalized();
-                    contact.Penetration = c.penetration_depth;
+                    contact.Normal      = n;
+                    contact.Penetration = std::max(0.f, c.penetration_depth);
                     // Use pair restitution that does not inflate bounce when one side is inelastic.
                     contact.Restitution = std::min(Bodies[i].Restitution, Bodies[j].Restitution);
                     Contacts.push_back(contact);
