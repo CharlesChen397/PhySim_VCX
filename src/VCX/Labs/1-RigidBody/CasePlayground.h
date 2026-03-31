@@ -67,6 +67,9 @@ namespace VCX::Labs::RigidBody {
         Eigen::Vector3f _lastImpulsePoint { 0.f, 0.f, 0.f };
         Eigen::Vector3f _lastImpulseVector { 0.f, 0.f, 0.f };
 
+        bool _b1KickPending { false };
+        int  _b1KickBodyId { -1 };
+
         std::array<char const *, 11> const _presetNames {
             "Base: Single Rigid Body",
             "Base: Double (Edge-Edge)",

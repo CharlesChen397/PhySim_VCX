@@ -127,6 +127,10 @@ namespace VCX::Labs::RigidBody {
         }
 
         applyUserInteraction(Engine::GetDeltaTime());
+        if (! _stopped && _b1KickPending && _b1KickBodyId >= 0 && _b1KickBodyId < static_cast<int>(_system.Bodies.size())) {
+            applyImpulseWithViz(_b1KickBodyId, _system.Bodies[_b1KickBodyId].X, Eigen::Vector3f(2.4f, 0.f, 0.f));
+            _b1KickPending = false;
+        }
         if (! _stopped) {
             stepSimulation(Engine::GetDeltaTime());
         }
@@ -158,7 +162,7 @@ namespace VCX::Labs::RigidBody {
         }
 
         float const frameDt = Engine::GetDeltaTime();
-        if (_impulseVizTimer > 0.f) {
+        if (! _stopped && _impulseVizTimer > 0.f) {
             _impulseVizTimer = std::max(0.f, _impulseVizTimer - frameDt);
         }
         if (_impulseVizTimer <= 0.f) {
@@ -171,11 +175,11 @@ namespace VCX::Labs::RigidBody {
             impulseVerts.reserve(7);
             impulseLines.reserve(12);
 
-            Eigen::Vector3f const j = _lastImpulseVector;
-            float const          jn = j.norm();
+            Eigen::Vector3f const j  = _lastImpulseVector;
+            float const           jn = j.norm();
             if (jn > 1e-6f) {
                 Eigen::Vector3f const dir = j / jn;
-                float const len = std::clamp(jn * _impulseVizScale, 0.25f, 3.0f);
+                float const           len = std::clamp(jn * _impulseVizScale, 0.25f, 3.0f);
 
                 Eigen::Vector3f const p0 = _lastImpulsePoint;
                 Eigen::Vector3f const p1 = p0 + dir * len;
@@ -189,12 +193,12 @@ namespace VCX::Labs::RigidBody {
                 side.normalize();
                 Eigen::Vector3f up = side.cross(dir).normalized();
 
-                float const headLen = 0.22f * len;
-                float const headWid = 0.14f * len;
-                Eigen::Vector3f const h1 = p1 - dir * headLen + side * headWid;
-                Eigen::Vector3f const h2 = p1 - dir * headLen - side * headWid;
-                Eigen::Vector3f const h3 = p1 - dir * headLen + up * headWid;
-                Eigen::Vector3f const h4 = p1 - dir * headLen - up * headWid;
+                float const           headLen = 0.22f * len;
+                float const           headWid = 0.14f * len;
+                Eigen::Vector3f const h1      = p1 - dir * headLen + side * headWid;
+                Eigen::Vector3f const h2      = p1 - dir * headLen - side * headWid;
+                Eigen::Vector3f const h3      = p1 - dir * headLen + up * headWid;
+                Eigen::Vector3f const h4      = p1 - dir * headLen - up * headWid;
 
                 impulseVerts.push_back(eigen2glm(p0));
                 impulseVerts.push_back(eigen2glm(p1));
@@ -204,12 +208,18 @@ namespace VCX::Labs::RigidBody {
                 impulseVerts.push_back(eigen2glm(h4));
 
                 impulseLines = {
-                    0, 1,
-                    1, 2,
-                    1, 3,
-                    1, 4,
-                    1, 5,
-                    0, 2,
+                    0,
+                    1,
+                    1,
+                    2,
+                    1,
+                    3,
+                    1,
+                    4,
+                    1,
+                    5,
+                    0,
+                    2,
                 };
 
                 _impulseItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(impulseVerts));
@@ -237,10 +247,12 @@ namespace VCX::Labs::RigidBody {
         }
 
         if (_hasImpulseViz && _showImpulseViz) {
+            glDisable(GL_DEPTH_TEST);
             glLineWidth(2.5f);
             _program.GetUniforms().SetByName("u_Color", glm::vec3(0.95f, 0.25f, 0.2f));
             _impulseItem.Draw({ _program.Use() });
             glLineWidth(1.f);
+            glEnable(GL_DEPTH_TEST);
         }
 
         glDisable(GL_LINE_SMOOTH);
@@ -304,18 +316,20 @@ namespace VCX::Labs::RigidBody {
         auto & body = _system.Bodies[bodyId];
         body.ApplyImpulse(worldPoint, impulse);
 
-        _hasImpulseViz    = true;
-        _impulseVizTimer  = _impulseVizDuration;
-        _lastImpulsePoint = worldPoint;
+        _hasImpulseViz     = true;
+        _impulseVizTimer   = _impulseVizDuration;
+        _lastImpulsePoint  = worldPoint;
         _lastImpulseVector = impulse;
     }
 
     void CasePlayground::resetPreset() {
         _presetDirty = false;
         _system.Clear();
-        _stopped   = true;
-        _timeScale = 1.f;
-        _substeps  = 1;
+        _stopped       = true;
+        _timeScale     = 1.f;
+        _substeps      = 1;
+        _b1KickPending = false;
+        _b1KickBodyId  = -1;
 
         switch (_preset) {
         case Preset::SingleBody:
@@ -440,6 +454,9 @@ namespace VCX::Labs::RigidBody {
 
         _timeScale = 0.35f;
         _substeps  = 4;
+        _showImpulseViz = true;
+        _impulseVizScale = std::max(_impulseVizScale, 0.3f);
+        _impulseVizDuration = std::max(_impulseVizDuration, 1.4f);
 
         std::vector<int> ids;
         ids.reserve(5);
@@ -453,12 +470,15 @@ namespace VCX::Labs::RigidBody {
             ids.push_back(id);
         }
 
-        if (_autoApplyKick && ! ids.empty()) {
-            int const first = ids.front();
-            applyImpulseWithViz(first, _system.Bodies[first].X, Eigen::Vector3f(2.4f, 0.f, 0.f));
+        if (! ids.empty()) {
+            _selectedBody = ids.front();
+            _b1KickBodyId = ids.front();
+            _b1KickPending = _autoApplyKick;
+        } else {
+            _selectedBody = 0;
+            _b1KickBodyId = -1;
+            _b1KickPending = false;
         }
-
-        _selectedBody = ids.empty() ? 0 : ids.front();
     }
 
     void CasePlayground::initBonusStacking() {
