@@ -56,6 +56,7 @@ namespace VCX::Labs::RigidBody {
             ImGui::SliderInt("Velocity Iterations", &_system.VelocityIterations, 2, 40);
             ImGui::SliderInt("Position Iterations", &_system.PositionIterations, 1, 10);
             ImGui::SliderFloat("Baumgarte Beta", &_system.BaumgarteBeta, 0.f, 0.8f);
+            ImGui::SliderFloat("Max Bias Velocity", &_system.MaxBiasVelocity, 0.2f, 4.0f);
             ImGui::SliderFloat("Penetration Slop", &_system.PenetrationSlop, 1e-4f, 2e-2f, "%.4f", ImGuiSliderFlags_Logarithmic);
             ImGui::SliderFloat("Restitution Threshold", &_system.RestitutionVelocityThreshold, 0.05f, 2.0f);
             ImGui::SliderFloat("Resting Linear Threshold", &_system.RestingLinearThreshold, 0.01f, 0.25f);
@@ -427,7 +428,14 @@ namespace VCX::Labs::RigidBody {
         _system.Gravity               = 9.8f;
         _system.EnableCCD             = true;
         _system.EnableSchurComplement = false;
-        _system.VelocityIterations    = 18;
+        _system.VelocityIterations    = 24;
+        _system.PositionIterations    = 6;
+        _system.BaumgarteBeta         = 0.14f;
+        _system.MaxBiasVelocity       = 1.1f;
+        _system.PenetrationSlop       = 2.0e-3f;
+
+        _timeScale = 0.9f;
+        _substeps  = 2;
 
         _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
         _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(-5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
@@ -435,7 +443,9 @@ namespace VCX::Labs::RigidBody {
 
         for (int i = 0; i < 5; ++i) {
             int id               = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(-1.5f + 0.8f * i, 2.5f + 1.0f * i, (i % 2 == 0) ? 0.5f : -0.5f), Eigen::Quaternionf::Identity(), 1.0f, false);
-            _system.Bodies[id].W = Eigen::Vector3f(0.2f * i, 0.1f, -0.1f * i);
+            _system.Bodies[id].Restitution = 0.06f;
+            _system.Bodies[id].Friction    = 0.75f;
+            _system.Bodies[id].W           = Eigen::Vector3f(0.08f * i, 0.03f, -0.05f * i);
         }
     }
 
@@ -452,10 +462,10 @@ namespace VCX::Labs::RigidBody {
         _system.RestingAngularThreshold      = 0.05f;
         _system.SleepTimeThreshold           = 1.0f;
 
-        _timeScale = 0.35f;
-        _substeps  = 4;
-        _showImpulseViz = true;
-        _impulseVizScale = std::max(_impulseVizScale, 0.3f);
+        _timeScale          = 0.35f;
+        _substeps           = 4;
+        _showImpulseViz     = true;
+        _impulseVizScale    = std::max(_impulseVizScale, 0.3f);
         _impulseVizDuration = std::max(_impulseVizDuration, 1.4f);
 
         std::vector<int> ids;
@@ -471,12 +481,12 @@ namespace VCX::Labs::RigidBody {
         }
 
         if (! ids.empty()) {
-            _selectedBody = ids.front();
-            _b1KickBodyId = ids.front();
+            _selectedBody  = ids.front();
+            _b1KickBodyId  = ids.front();
             _b1KickPending = _autoApplyKick;
         } else {
-            _selectedBody = 0;
-            _b1KickBodyId = -1;
+            _selectedBody  = 0;
+            _b1KickBodyId  = -1;
             _b1KickPending = false;
         }
     }
@@ -485,15 +495,26 @@ namespace VCX::Labs::RigidBody {
         _system.Gravity               = 9.8f;
         _system.EnableCCD             = true;
         _system.EnableSchurComplement = false;
-        _system.VelocityIterations    = 32;
+        _system.VelocityIterations    = 26;
         _system.PositionIterations    = 8;
-        _system.BaumgarteBeta         = 0.28f;
+        _system.BaumgarteBeta         = 0.12f;
+        _system.MaxBiasVelocity       = 0.9f;
+        _system.PenetrationSlop       = 2.5e-3f;
+        _system.RestitutionVelocityThreshold = 1.0f;
+        _system.RestingLinearThreshold       = 0.06f;
+        _system.RestingAngularThreshold      = 0.10f;
+        _system.SleepTimeThreshold           = 0.35f;
+
+        _timeScale = 0.8f;
+        _substeps  = 4;
 
         _system.AddBox(Eigen::Vector3f(10.f, 0.4f, 10.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
         for (int i = 0; i < 6; ++i) {
-            int id                         = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(0.f, -1.6f + 1.02f * i, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
-            _system.Bodies[id].Restitution = 0.05f;
-            _system.Bodies[id].Friction    = 0.8f;
+            float const y                 = -1.5f + 1.02f * i;
+            int   id                      = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(0.f, y, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+            _system.Bodies[id].Restitution = 0.0f;
+            _system.Bodies[id].Friction    = 0.88f;
+            _system.Bodies[id].W.setZero();
         }
     }
 

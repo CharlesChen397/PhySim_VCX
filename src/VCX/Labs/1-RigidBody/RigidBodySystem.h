@@ -73,6 +73,7 @@ namespace VCX::Labs::RigidBody {
         int   VelocityIterations { 12 };
         int   PositionIterations { 3 };
         float BaumgarteBeta { 0.2f };
+        float MaxBiasVelocity { 1.5f };
         float PenetrationSlop { 1e-3f };
         float RestitutionVelocityThreshold { 0.6f };
         float RestingLinearThreshold { 0.08f };

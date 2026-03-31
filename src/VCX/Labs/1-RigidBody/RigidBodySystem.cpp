@@ -339,9 +339,16 @@ namespace VCX::Labs::RigidBody {
                 Eigen::Vector3f const vb = b.V + b.W.cross(rb);
                 Eigen::Vector3f const rv = vb - va;
 
-                float const vn          = rv.dot(c.Normal);
-                float const bias        = -BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
-                float const restitution = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
+                float const vn               = rv.dot(c.Normal);
+                float const penetrationError = std::max(0.f, c.Penetration - PenetrationSlop);
+                float const biasVel          = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));
+                float const restitution      = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
+
+                // If the pair is already separating and there is no meaningful penetration,
+                // skip this contact row to avoid injecting energy.
+                if (vn > 0.f && penetrationError <= 1e-5f) {
+                    continue;
+                }
 
                 Eigen::Vector3f const iRaN    = a.GetWorldInvInertia() * ra.cross(c.Normal);
                 Eigen::Vector3f const iRbN    = b.GetWorldInvInertia() * rb.cross(c.Normal);
@@ -350,8 +357,7 @@ namespace VCX::Labs::RigidBody {
                     continue;
                 }
 
-                float jn = -(vn + bias) - restitution * vn;
-                jn /= effMass;
+                float jn = (-(1.f + restitution) * vn + biasVel) / effMass;
                 jn = std::max(0.f, jn);
 
                 Eigen::Vector3f const normalImpulse = jn * c.Normal;
@@ -406,8 +412,13 @@ namespace VCX::Labs::RigidBody {
             Eigen::Vector3f const va          = a.V + a.W.cross(ra);
             Eigen::Vector3f const vb          = b0.V + b0.W.cross(rb);
             float const           vn          = (vb - va).dot(c.Normal);
-            float const           restitution = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
-            float const           bias        = (1.f + restitution) * vn - BaumgarteBeta * std::max(0.f, c.Penetration - PenetrationSlop) / std::max(dt, 1e-6f);
+            float const           penetrationError = std::max(0.f, c.Penetration - PenetrationSlop);
+            float const           restitution      = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
+            float const           biasVel          = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));
+            if (vn > 0.f && penetrationError <= 1e-5f) {
+                continue;
+            }
+            float const bias = (1.f + restitution) * vn - biasVel;
             rows.push_back(ConstraintRow {
                 .A          = c.A,
                 .B          = c.B,
@@ -572,25 +583,25 @@ namespace VCX::Labs::RigidBody {
     }
 
     void RigidBodySystem::stabilizeRestingContacts(float dt) {
-        if (Contacts.empty()) {
-            for (auto & body : Bodies) {
-                if (! body.Fixed) {
-                    body.Sleeping   = false;
-                    body.SleepTimer = 0.f;
-                }
-            }
-            return;
-        }
-
         std::vector<bool> supportContact(Bodies.size(), false);
+
+        auto isStableSupport = [this](RigidBody const & body) {
+            if (body.Fixed || body.Sleeping) {
+                return true;
+            }
+            float const v2 = body.V.squaredNorm();
+            float const w2 = body.W.squaredNorm();
+            return v2 < std::pow(4.f * RestingLinearThreshold, 2.f) && w2 < std::pow(4.f * RestingAngularThreshold, 2.f);
+        };
+
         for (auto const & c : Contacts) {
             auto const & a = Bodies[c.A];
             auto const & b = Bodies[c.B];
 
-            if (! a.Fixed && (b.Fixed || b.Sleeping) && c.Normal.y() < -0.3f) {
+            if (! a.Fixed && c.Normal.y() < -0.5f && isStableSupport(b)) {
                 supportContact[c.A] = true;
             }
-            if (! b.Fixed && (a.Fixed || a.Sleeping) && c.Normal.y() > 0.3f) {
+            if (! b.Fixed && c.Normal.y() > 0.5f && isStableSupport(a)) {
                 supportContact[c.B] = true;
             }
         }
@@ -606,15 +617,20 @@ namespace VCX::Labs::RigidBody {
             bool const  nearResting  = linearSpeed < RestingLinearThreshold && angularSpeed < RestingAngularThreshold;
 
             if (supportContact[i] && linearSpeed < 2.f * RestingLinearThreshold && angularSpeed < 2.f * RestingAngularThreshold) {
-                if (std::abs(body.V.y()) < RestitutionVelocityThreshold) {
+                if (body.V.y() > 0.f || std::abs(body.V.y()) < RestitutionVelocityThreshold) {
                     body.V.y() = 0.f;
                 }
                 if (std::abs(body.V.x()) < RestingLinearThreshold) {
                     body.V.x() = 0.f;
+                } else {
+                    body.V.x() *= 0.6f;
                 }
                 if (std::abs(body.V.z()) < RestingLinearThreshold) {
                     body.V.z() = 0.f;
+                } else {
+                    body.V.z() *= 0.6f;
                 }
+                body.W *= 0.65f;
                 if (nearResting) {
                     body.V.setZero();
                     body.W.setZero();
@@ -631,9 +647,6 @@ namespace VCX::Labs::RigidBody {
             } else {
                 body.SleepTimer = 0.f;
                 if (linearSpeed > 2.f * RestingLinearThreshold || angularSpeed > 2.f * RestingAngularThreshold) {
-                    body.Sleeping = false;
-                }
-                if (! supportContact[i]) {
                     body.Sleeping = false;
                 }
             }
