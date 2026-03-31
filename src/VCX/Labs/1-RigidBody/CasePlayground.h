@@ -52,6 +52,8 @@ namespace VCX::Labs::RigidBody {
         bool   _presetDirty { true };
         bool   _showWireframe { true };
         bool   _autoApplyKick { true };
+        float  _timeScale { 1.f };
+        int    _substeps { 1 };
 
         int   _selectedBody { 0 };
         float _userImpulse { 4.f };

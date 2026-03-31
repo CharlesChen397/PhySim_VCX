@@ -1,5 +1,7 @@
 #include "Labs/1-RigidBody/CasePlayground.h"
 
+#include <algorithm>
+
 #include "Engine/app.h"
 #include "Labs/1-RigidBody/PrimitiveMesh.h"
 
@@ -46,6 +48,8 @@ namespace VCX::Labs::RigidBody {
             ImGui::Checkbox("Enable CCD", &_system.EnableCCD);
             ImGui::Checkbox("Enable Schur Solve (B4)", &_system.EnableSchurComplement);
             ImGui::Checkbox("Enable Warm Start", &_system.EnableWarmStart);
+            ImGui::SliderFloat("Simulation Time Scale", &_timeScale, 0.1f, 1.5f);
+            ImGui::SliderInt("Simulation Substeps", &_substeps, 1, 8);
             ImGui::SliderFloat("Gravity", &_system.Gravity, 0.f, 20.f);
             ImGui::SliderInt("Velocity Iterations", &_system.VelocityIterations, 2, 40);
             ImGui::SliderInt("Position Iterations", &_system.PositionIterations, 1, 10);
@@ -189,7 +193,12 @@ namespace VCX::Labs::RigidBody {
     }
 
     void CasePlayground::stepSimulation(float dt) {
-        _system.Step(dt);
+        float const scaledDt = dt * _timeScale;
+        int const   substeps = std::max(1, _substeps);
+        float const h        = scaledDt / static_cast<float>(substeps);
+        for (int i = 0; i < substeps; ++i) {
+            _system.Step(h);
+        }
     }
 
     void CasePlayground::applyUserInteraction(float dt) {
@@ -211,7 +220,9 @@ namespace VCX::Labs::RigidBody {
     void CasePlayground::resetPreset() {
         _presetDirty = false;
         _system.Clear();
-        _stopped = true;
+        _stopped   = true;
+        _timeScale = 1.f;
+        _substeps  = 1;
 
         switch (_preset) {
         case Preset::SingleBody:
@@ -322,21 +333,39 @@ namespace VCX::Labs::RigidBody {
     }
 
     void CasePlayground::initBonusNewtonCradle() {
-        _system.Gravity               = 9.8f;
-        _system.EnableCCD             = false;
-        _system.EnableSchurComplement = false;
-        _system.VelocityIterations    = 26;
+        _system.Gravity                      = 0.f;
+        _system.EnableCCD                    = false;
+        _system.EnableSchurComplement        = false;
+        _system.VelocityIterations           = 32;
+        _system.PositionIterations           = 6;
+        _system.BaumgarteBeta                = 0.16f;
+        _system.PenetrationSlop              = 6e-4f;
+        _system.RestitutionVelocityThreshold = 0.05f;
+        _system.RestingLinearThreshold       = 0.03f;
+        _system.RestingAngularThreshold      = 0.05f;
+        _system.SleepTimeThreshold           = 1.0f;
 
-        _system.AddBox(Eigen::Vector3f(12.f, 0.4f, 6.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        _timeScale = 0.35f;
+        _substeps  = 4;
+
+        std::vector<int> ids;
+        ids.reserve(5);
 
         for (int i = 0; i < 5; ++i) {
-            float x                        = -2.f + float(i) * 1.0f;
-            int   id                       = _system.AddBox(Eigen::Vector3f(0.9f, 0.9f, 0.9f), Eigen::Vector3f(x, -0.6f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
-            _system.Bodies[id].Restitution = 0.95f;
+            float const x                  = -1.84f + float(i) * 0.92f;
+            int const   id                 = _system.AddBox(Eigen::Vector3f(0.9f, 0.9f, 0.9f), Eigen::Vector3f(x, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+            _system.Bodies[id].Restitution = 0.98f;
+            _system.Bodies[id].Friction    = 0.02f;
+            _system.Bodies[id].W.setZero();
+            ids.push_back(id);
         }
-        if (_autoApplyKick && _system.Bodies.size() > 1) {
-            _system.Bodies[1].ApplyImpulse(_system.Bodies[1].X, Eigen::Vector3f(12.f, 0.f, 0.f));
+
+        if (_autoApplyKick && ! ids.empty()) {
+            int const first = ids.front();
+            _system.Bodies[first].ApplyImpulse(_system.Bodies[first].X, Eigen::Vector3f(2.4f, 0.f, 0.f));
         }
+
+        _selectedBody = ids.empty() ? 0 : ids.front();
     }
 
     void CasePlayground::initBonusStacking() {
