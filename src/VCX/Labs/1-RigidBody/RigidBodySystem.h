@@ -38,6 +38,8 @@ namespace VCX::Labs::RigidBody {
         Eigen::Vector3f Dim { 1.f, 1.f, 1.f }; // for box
         float           Radius { 0.5f };       // for sphere/cylinder
         float           Height { 1.f };        // for cylinder
+        bool            Sleeping { false };
+        float           SleepTimer { 0.f };
 
         Eigen::Matrix3f InertiaBodyInv { Eigen::Matrix3f::Identity() };
 
@@ -75,6 +77,7 @@ namespace VCX::Labs::RigidBody {
         float RestitutionVelocityThreshold { 0.6f };
         float RestingLinearThreshold { 0.08f };
         float RestingAngularThreshold { 0.12f };
+        float SleepTimeThreshold { 0.45f };
 
         bool EnableCCD { true };
         bool EnableWarmStart { true };
@@ -106,7 +109,7 @@ namespace VCX::Labs::RigidBody {
         void solveContactsSchur(float dt);
         void solvePositionCorrection();
         void solveJointsSequential(float dt);
-        void stabilizeRestingContacts();
+        void stabilizeRestingContacts(float dt);
 
         float getNormalImpulseCache(int a, int b) const;
         void  setNormalImpulseCache(int a, int b, float impulse);

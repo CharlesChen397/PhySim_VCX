@@ -48,7 +48,7 @@ namespace VCX::Labs::RigidBody {
         RigidBodySystem _system;
 
         Preset _preset { Preset::SingleBody };
-        bool   _stopped { false };
+        bool   _stopped { true };
         bool   _presetDirty { true };
         bool   _showWireframe { true };
         bool   _autoApplyKick { true };

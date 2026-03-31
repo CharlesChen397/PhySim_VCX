@@ -3,7 +3,9 @@
 namespace VCX::Labs::RigidBody {
 
     App::App():
-        _ui(Labs::Common::UIOptions {}) {
+        _ui(Labs::Common::UIOptions {
+            .SideWindowWidth = 420.f,
+        }) {
     }
 
     void App::OnFrame() {
