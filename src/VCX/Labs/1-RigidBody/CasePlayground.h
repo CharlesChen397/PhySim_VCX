@@ -41,6 +41,7 @@ namespace VCX::Labs::RigidBody {
         Engine::GL::UniqueRenderFrame       _frame;
         Engine::GL::UniqueIndexedRenderItem _solidItem;
         Engine::GL::UniqueIndexedRenderItem _wireItem;
+        Engine::GL::UniqueIndexedRenderItem _impulseItem;
 
         Engine::Camera             _camera { .Eye = glm::vec3(-8.f, 6.f, 8.f), .Target = glm::vec3(0.f, 0.f, 0.f) };
         Common::OrbitCameraManager _cameraManager;
@@ -51,12 +52,20 @@ namespace VCX::Labs::RigidBody {
         bool   _stopped { true };
         bool   _presetDirty { true };
         bool   _showWireframe { true };
+        bool   _showImpulseViz { true };
         bool   _autoApplyKick { true };
         float  _timeScale { 1.f };
         int    _substeps { 1 };
 
         int   _selectedBody { 0 };
         float _userImpulse { 4.f };
+        float _impulseVizDuration { 1.2f };
+        float _impulseVizScale { 0.2f };
+
+        bool            _hasImpulseViz { false };
+        float           _impulseVizTimer { 0.f };
+        Eigen::Vector3f _lastImpulsePoint { 0.f, 0.f, 0.f };
+        Eigen::Vector3f _lastImpulseVector { 0.f, 0.f, 0.f };
 
         std::array<char const *, 11> const _presetNames {
             "Base: Single Rigid Body",
@@ -75,6 +84,7 @@ namespace VCX::Labs::RigidBody {
         void resetPreset();
         void stepSimulation(float dt);
         void applyUserInteraction(float dt);
+        void applyImpulseWithViz(int bodyId, Eigen::Vector3f const & worldPoint, Eigen::Vector3f const & impulse);
 
         void initSingleBody();
         void initDoubleEdge();
