@@ -1,5 +1,6 @@
 % !TEX program = xelatex
 \documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage{amsmath}
 \usepackage{geometry}
 \usepackage{hyperref}
 \usepackage{enumitem}
@@ -7,7 +8,10 @@
 \geometry{margin=2.2cm}
 
 \title{Lab1：刚体仿真（VCX）\\实现说明与交互}
-\author{学号：\underline{\hspace{4cm}}\quad 姓名：\underline{\hspace{3cm}}}
+\author{%
+  学号：2400012935\quad 姓名：陈羿桥\\[0.35em]
+  \small Git：CharlesChen397\quad 邮箱：\texttt{charleschen397@gmail.com}%
+}
 \date{\today}
 
 \begin{document}
@@ -72,6 +76,6 @@
 请在视频中依次或择要展示：单体平动与转动、双体 FCL 接触与分离、复杂场景多体与墙/地面、以及所完成的 Bonus 场景；若实现 Schur，请切换到 \textbf{Bonus B4} 场景并说明与顺序解算的差异。
 
 \vspace{1em}
-\noindent\textit{打包提交前请执行 \texttt{xmake clean -a} 清理构建产物；将 \texttt{lab1\_log.txt}（由 \texttt{git log --stat > lab1\_log.txt} 生成）、源代码与本报告及视频一并打入 \texttt{lab1\_<学号>.zip}。}
+\noindent\textit{打包提交前请执行 \texttt{xmake clean -a} 清理构建产物；将 \texttt{lab1\_log.txt}（由 \texttt{git log --stat > lab1\_log.txt} 生成）、源代码与本报告及视频一并打入 \texttt{lab1\_2400012935.zip}。}
 
 \end{document}
