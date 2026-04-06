@@ -1,0 +1,77 @@
+% !TEX program = xelatex
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\geometry{margin=2.2cm}
+
+\title{Lab1：刚体仿真（VCX）\\实现说明与交互}
+\author{学号：\underline{\hspace{4cm}}\quad 姓名：\underline{\hspace{3cm}}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+本文档概述 \texttt{PhySim\_VCX} 中 Lab1 刚体模块的核心实现思路与可执行程序中的交互方式。
+演示视频由本人另行录制并附于作业压缩包中。
+\end{abstract}
+
+\section{工程与运行}
+\begin{itemize}[leftmargin=*]
+  \item 目标：\texttt{xmake build lab1}，运行：\texttt{xmake run lab1}。
+  \item 主逻辑位于 \texttt{src/VCX/Labs/1-RigidBody/}，物理核心为 \texttt{RigidBodySystem}，场景与 UI 为 \texttt{CasePlayground}。
+\end{itemize}
+
+\section{核心代码实现}
+
+\subsection{状态与积分}
+每个刚体维护质心位置 $\mathbf{x}$、姿态四元数 $q$、线速度 $\mathbf{v}$、角速度 $\boldsymbol{\omega}$；盒子、球、柱在体轴系下使用对角惯量及其逆。
+平动采用显式欧拉：先 $\mathbf{v}\leftarrow\mathbf{v}+\Delta t\,( \mathbf{g}+\mathbf{F}/m)$，再 $\mathbf{x}\leftarrow\mathbf{x}+\Delta t\,\mathbf{v}$。
+转动采用课件中的欧拉方程与四元数导数：
+\[
+\dot{\boldsymbol{\omega}} = \mathbf{I}^{-1}\bigl(\boldsymbol{\tau}-\boldsymbol{\omega}\times(\mathbf{I}\boldsymbol{\omega})\bigr),\qquad
+\dot{q}=\tfrac{1}{2}[0,\boldsymbol{\omega}]q,
+\]
+每步后对 $q$ 归一化。实现见 \texttt{RigidBodySystem::integrateBodies}。
+
+\subsection{碰撞检测（FCL）}
+成对调用 \texttt{fcl::collide}，几何随 \texttt{ShapeType} 选择 \texttt{Box}/\texttt{Sphere}/\texttt{Cylinder}，位姿由质心与四元数构造。
+将接触法向统一为从体 \texttt{A} 指向体 \texttt{B}，并记录穿透深度供约束使用（\texttt{detectCollisions}）。
+
+\subsection{碰撞响应（顺序冲量为主）}
+默认路径为顺序迭代（PGS 风格）：对每个接触算法向冲量（含 Baumgarte 穿透偏置、低速时关闭恢复系数），再算 Coulomb 摩擦冲量；可选多轮 \texttt{VelocityIterations}。
+位置级用沿法向的分摊修正减轻穿透（\texttt{solvePositionCorrection}），并带步前仅平移的松弛以削弱初始重叠带来的爆炸（\texttt{relaxOverlappingPositions}）。
+
+\subsection{Schur 补路径（Bonus B4）}
+当 \texttt{EnableSchurComplement} 为真时，将法向约束组装为 $\mathbf{A}\boldsymbol{\lambda}=\mathbf{b}$ 形式，用 LDLT 一次求解并在 $\lambda\ge 0$ 上投影；对低速静止接触削弱 Baumgarte，并对法向冲量做与 $M g\Delta t$ 等相关的上限，减轻多点接触时的数值弹飞。
+摩擦仍仅在顺序路径中完整处理；Schur 路径不含摩擦行。
+
+\subsection{其他}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{CCD}：对高速相对平移做二分 TOI，回退位姿（\texttt{continuousCollisionPass}）。
+  \item \textbf{关节}：点对点约束，顺序块雅可比求解（\texttt{solveJointsSequential}）；与 Schur 联用时关节行并入同一矩阵（若开启 Schur）。
+  \item \textbf{休眠/支撑}：低速贴地时衰减速度与休眠，减轻抖动（\texttt{stabilizeRestingContacts}）。
+\end{itemize}
+
+\section{交互说明（CasePlayground）}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Scenario}：下拉切换基础 Demo（单体、双体多种接触、复杂场景）及 Bonus（牛顿摆、堆叠、混合体、Schur、铰链、CCD 等）；\textbf{Reset Preset} 重置当前场景物理与默认求解参数。
+  \item \textbf{Start / Stop Simulation}：控制是否在渲染帧中推进 \texttt{Step}（含子步与时间缩放）。
+  \item \textbf{Selected Body}：选择受下述控件作用的刚体索引。
+  \item \textbf{Impulse Strength} 与 \textbf{Impulse $\pm$X/Y/Z}：对选中体质心施加世界系轴向冲量（用于“键盘/按钮施加外力”类交互）。
+  \item \textbf{Linear Vx/Vy/Vz、Angular Wx/Wy/Wz}：直接读写选中体的速度与角速度，便于单体验证初值；仿真运行中仍会由物理更新覆盖。
+  \item \textbf{Gravity}：全局重力加速度大小（$y$ 轴负向），复杂场景等预设会在 Reset 时写入合理默认值，也可运行时调节。
+  \item \textbf{鼠标}：与相机管理器联动；在选中非固定刚体时，鼠标位移可映射为对质心的冲量（实现外力拖动感）。
+  \item \textbf{键盘}（焦点在视图时）：\texttt{J/L/I/K/U/O} 等键对选中体施加冲量（与 UI 冲量强度联动）。
+\end{itemize}
+
+\section{Demo 与报告对应关系}
+请在视频中依次或择要展示：单体平动与转动、双体 FCL 接触与分离、复杂场景多体与墙/地面、以及所完成的 Bonus 场景；若实现 Schur，请切换到 \textbf{Bonus B4} 场景并说明与顺序解算的差异。
+
+\vspace{1em}
+\noindent\textit{打包提交前请执行 \texttt{xmake clean -a} 清理构建产物；将 \texttt{lab1\_log.txt}（由 \texttt{git log --stat > lab1\_log.txt} 生成）、源代码与本报告及视频一并打入 \texttt{lab1\_<学号>.zip}。}
+
+\end{document}

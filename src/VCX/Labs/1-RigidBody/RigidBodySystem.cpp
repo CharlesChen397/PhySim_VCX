@@ -188,6 +188,10 @@ namespace VCX::Labs::RigidBody {
             return;
         }
 
+        if (RelaxOverlapsBeforeIntegrate) {
+            relaxOverlappingPositions();
+        }
+
         _prevStates.resize(Bodies.size());
         for (std::size_t i = 0; i < Bodies.size(); ++i) {
             _prevStates[i] = BodyState { .X = Bodies[i].X, .Q = Bodies[i].Q };
@@ -218,19 +222,68 @@ namespace VCX::Labs::RigidBody {
             if (body.Fixed || body.Sleeping) {
                 continue;
             }
+            // Translational: explicit Euler (课件 §2, §6)
             Eigen::Vector3f const gravityAccel(0.f, -Gravity, 0.f);
-            Eigen::Vector3f const linearAccel  = gravityAccel + body.Force * body.InvMass;
-            Eigen::Vector3f const angularAccel = body.GetWorldInvInertia() * body.Torque;
-
+            Eigen::Vector3f const linearAccel = gravityAccel + body.Force * body.InvMass;
             body.V += linearAccel * dt;
-            body.W += angularAccel * dt;
-
             body.X += body.V * dt;
 
+            // Rotational: ω ← ω + Δt · I⁻¹(τ − ω×(Iω)) （课件 §5 欧拉方程）
+            Eigen::Matrix3f const R       = body.Q.normalized().toRotationMatrix();
+            Eigen::Matrix3f       Ibody = Eigen::Matrix3f::Zero();
+            for (int i = 0; i < 3; ++i) {
+                float const invIi = body.InertiaBodyInv(i, i);
+                if (std::abs(invIi) > 1e-12f) {
+                    Ibody(i, i) = 1.f / invIi;
+                }
+            }
+            Eigen::Matrix3f const Iworld = R * Ibody * R.transpose();
+            Eigen::Vector3f const L        = Iworld * body.W;
+            Eigen::Vector3f const tauNet   = body.Torque - body.W.cross(L);
+            Eigen::Vector3f const angularAccel = body.GetWorldInvInertia() * tauNet;
+            body.W += angularAccel * dt;
+
+            // Quaternion: Q ← Q + (Δt/2)[0,ω]×Q，再归一化（课件 §4）
             Eigen::Quaternionf const wq(0.f, body.W.x(), body.W.y(), body.W.z());
             body.Q.coeffs() += (0.5f * dt * (wq * body.Q).coeffs());
             body.Q.normalize();
         }
+    }
+
+    void RigidBodySystem::relaxOverlappingPositions() {
+        constexpr float relaxFactor = 0.48f;
+        for (int p = 0; p < RelaxOverlapPasses; ++p) {
+            detectCollisions();
+            if (Contacts.empty()) {
+                break;
+            }
+            bool moved = false;
+            for (auto const & c : Contacts) {
+                auto & a = Bodies[c.A];
+                auto & b = Bodies[c.B];
+                float  depth = std::max(0.f, c.Penetration - PenetrationSlop);
+                if (depth <= 0.f) {
+                    continue;
+                }
+                depth = std::min(depth, MaxDepthPerPositionPass);
+                float const invMassSum = a.InvMass + b.InvMass;
+                if (invMassSum <= 1e-8f) {
+                    continue;
+                }
+                Eigen::Vector3f const corr = (relaxFactor * depth / invMassSum) * c.Normal;
+                moved = true;
+                if (! a.Fixed) {
+                    a.X -= a.InvMass * corr;
+                }
+                if (! b.Fixed) {
+                    b.X += b.InvMass * corr;
+                }
+            }
+            if (! moved) {
+                break;
+            }
+        }
+        Contacts.clear();
     }
 
     void RigidBodySystem::continuousCollisionPass(float dt) {
@@ -353,14 +406,15 @@ namespace VCX::Labs::RigidBody {
                 Eigen::Vector3f const vb = b.V + b.W.cross(rb);
                 Eigen::Vector3f const rv = vb - va;
 
-                float const vn               = rv.dot(c.Normal);
-                float const penetrationError = std::max(0.f, c.Penetration - PenetrationSlop);
+                float const vn = rv.dot(c.Normal);
+                float const rawPen           = std::max(0.f, c.Penetration - PenetrationSlop);
+                float const penetrationError = std::min(rawPen, BiasPenetrationCap);
                 float const biasVel          = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));
                 float const restitution      = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
 
                 // If the pair is already separating and there is no meaningful penetration,
                 // skip this contact row to avoid injecting energy.
-                if (vn > 0.f && penetrationError <= 1e-5f) {
+                if (vn > 0.f && rawPen <= 1e-5f) {
                     continue;
                 }
 
@@ -419,6 +473,7 @@ namespace VCX::Labs::RigidBody {
             float           Bias { 0.f };
             bool            Unilateral { false };
             Eigen::Vector3f Point { 0.f, 0.f, 0.f };
+            float           RowVn { 0.f };
         };
 
         std::vector<ConstraintRow> rows;
@@ -431,11 +486,15 @@ namespace VCX::Labs::RigidBody {
             Eigen::Vector3f const rb               = c.Point - b0.X;
             Eigen::Vector3f const va               = a.V + a.W.cross(ra);
             Eigen::Vector3f const vb               = b0.V + b0.W.cross(rb);
-            float const           vn               = (vb - va).dot(c.Normal);
-            float const           penetrationError = std::max(0.f, c.Penetration - PenetrationSlop);
-            float const           restitution      = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
-            float const           biasVel          = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));
-            if (vn > 0.f && penetrationError <= 1e-5f) {
+            float const           vn        = (vb - va).dot(c.Normal);
+            float const           rawPen    = std::max(0.f, c.Penetration - PenetrationSlop);
+            float const           penetrationError = std::min(rawPen, BiasPenetrationCap);
+            float const           restitution = (vn < -RestitutionVelocityThreshold) ? c.Restitution : 0.f;
+            float                 biasVel     = std::min(MaxBiasVelocity, BaumgarteBeta * penetrationError / std::max(dt, 1e-6f));
+            if (restitution < 1e-6f && std::abs(vn) < SchurRestingNormalThreshold && rawPen < 0.05f) {
+                biasVel *= SchurRestingBiasScale;
+            }
+            if (vn > 0.f && rawPen <= 1e-5f) {
                 continue;
             }
             float const bias = (1.f + restitution) * vn - biasVel;
@@ -448,6 +507,7 @@ namespace VCX::Labs::RigidBody {
                 .Bias       = bias,
                 .Unilateral = true,
                 .Point      = c.Point,
+                .RowVn      = vn,
             });
         }
 
@@ -476,6 +536,7 @@ namespace VCX::Labs::RigidBody {
                     .Bias       = bias,
                     .Unilateral = false,
                     .Point      = 0.5f * (pa + pb),
+                    .RowVn      = 0.f,
                 });
             }
         }
@@ -522,13 +583,26 @@ namespace VCX::Labs::RigidBody {
             }
         }
 
-        A += 1e-5f * Eigen::MatrixXf::Identity(m, m);
+        A += 2e-4f * Eigen::MatrixXf::Identity(m, m);
 
         Eigen::VectorXf lambda = A.ldlt().solve(-b);
+        float const     gEff = std::max(Gravity, 0.5f);
         for (int i = 0; i < m; ++i) {
             float li = lambda(i);
             if (rows[i].Unilateral) {
                 li = std::max(0.f, li);
+                auto const & ba = Bodies[rows[i].A];
+                auto const & bb = Bodies[rows[i].B];
+                float const  mDyn =
+                    (ba.InvMass < 1e-8f) ? bb.Mass : ((bb.InvMass < 1e-8f) ? ba.Mass : std::min(ba.Mass, bb.Mass));
+                float const capRest = mDyn * gEff * std::max(dt, 1e-5f) * SchurImpulseGravityMult;
+                float const vnAbs   = std::abs(rows[i].RowVn);
+                float       cap     = std::max(SchurMinNormalImpulseCap, capRest);
+                if (vnAbs > SchurRestingNormalThreshold * 1.35f) {
+                    float const capColl = mDyn * (vnAbs * 1.25f + 0.8f);
+                    cap                 = std::max(cap, std::max(SchurMinNormalImpulseCap * 5.f, capColl));
+                }
+                li = std::min(li, cap);
             }
             Eigen::Vector3f const impulse = li * rows[i].N;
             Bodies[rows[i].A].ApplyImpulse(rows[i].Point, -impulse);
@@ -587,10 +661,11 @@ namespace VCX::Labs::RigidBody {
                 if (invMassSum <= 1e-8f) {
                     continue;
                 }
-                float const depth = std::max(0.f, c.Penetration - PenetrationSlop);
+                float depth = std::max(0.f, c.Penetration - PenetrationSlop);
                 if (depth <= 0.f) {
                     continue;
                 }
+                depth                    = std::min(depth, MaxDepthPerPositionPass);
                 Eigen::Vector3f const corr = (0.6f * depth / invMassSum) * c.Normal;
                 if (! a.Fixed) {
                     a.X -= a.InvMass * corr;

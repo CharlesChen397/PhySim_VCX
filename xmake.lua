@@ -4,8 +4,10 @@ set_xmakever("2.6.9")
 set_languages("cxx20")
 
 add_rules("mode.debug", "mode.release", "mode.profile")
+set_policy("run.autobuild", true)
 add_cxxflags("/utf-8")
 
+-- lab1 用 fcl；与 glad/libccd 等 CMake 包在 CMake 4.0+ 上需环境变量 CMAKE_POLICY_VERSION_MINIMUM=3.5（见 README FAQ，或直接用 ./xmake.sh）。
 add_requires("fcl")
 add_requires("glad")
 add_requires("glfw")

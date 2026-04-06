@@ -75,6 +75,12 @@ namespace VCX::Labs::RigidBody {
         float BaumgarteBeta { 0.2f };
         float MaxBiasVelocity { 1.5f };
         float PenetrationSlop { 1e-3f };
+        /// 参与 Baumgarte 法向偏置的最大穿透深度，防止初始深穿透时冲量爆炸
+        float BiasPenetrationCap { 0.12f };
+        /// 单次位置分离时，每个接触点最多按此深度（米）参与推开，避免一帧吃掉过大穿透
+        float MaxDepthPerPositionPass { 0.16f };
+        bool  RelaxOverlapsBeforeIntegrate { true };
+        int   RelaxOverlapPasses { 12 };
         float RestitutionVelocityThreshold { 0.6f };
         float RestingLinearThreshold { 0.08f };
         float RestingAngularThreshold { 0.12f };
@@ -83,6 +89,12 @@ namespace VCX::Labs::RigidBody {
         bool EnableCCD { true };
         bool EnableWarmStart { true };
         bool EnableSchurComplement { false };
+        /// Schur 法向冲量额外安全系数，单点上限约 ≈ M·g·dt·该系数（再与下限取 max）
+        float SchurImpulseGravityMult { 5.5f };
+        float SchurMinNormalImpulseCap { 0.35f };
+        /// |vn| 低于此且接近静止接触时削弱 Baumgarte，减轻“落地后突然飞天”
+        float SchurRestingNormalThreshold { 0.2f };
+        float SchurRestingBiasScale { 0.35f };
 
         std::vector<RigidBody>  Bodies;
         std::vector<Contact>    Contacts;
@@ -105,6 +117,7 @@ namespace VCX::Labs::RigidBody {
         void integrateBodies(float dt);
         void continuousCollisionPass(float dt);
         void detectCollisions();
+        void relaxOverlappingPositions();
 
         void solveContactsSequential(float dt);
         void solveContactsSchur(float dt);

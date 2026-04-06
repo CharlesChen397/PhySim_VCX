@@ -46,80 +46,50 @@ namespace VCX::Labs::RigidBody {
             _stopped = ! _stopped;
         }
 
-        if (ImGui::CollapsingHeader("Global Physics", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("Enable CCD", &_system.EnableCCD);
-            ImGui::Checkbox("Enable Schur Solve (B4)", &_system.EnableSchurComplement);
-            ImGui::Checkbox("Enable Warm Start", &_system.EnableWarmStart);
-            ImGui::SliderFloat("Simulation Time Scale", &_timeScale, 0.1f, 1.5f);
-            ImGui::SliderInt("Simulation Substeps", &_substeps, 1, 8);
-            ImGui::SliderFloat("Gravity", &_system.Gravity, 0.f, 20.f);
-            ImGui::SliderInt("Velocity Iterations", &_system.VelocityIterations, 2, 40);
-            ImGui::SliderInt("Position Iterations", &_system.PositionIterations, 1, 10);
-            ImGui::SliderFloat("Baumgarte Beta", &_system.BaumgarteBeta, 0.f, 0.8f);
-            ImGui::SliderFloat("Max Bias Velocity", &_system.MaxBiasVelocity, 0.2f, 4.0f);
-            ImGui::SliderFloat("Penetration Slop", &_system.PenetrationSlop, 1e-4f, 2e-2f, "%.4f", ImGuiSliderFlags_Logarithmic);
-            ImGui::SliderFloat("Restitution Threshold", &_system.RestitutionVelocityThreshold, 0.05f, 2.0f);
-            ImGui::SliderFloat("Resting Linear Threshold", &_system.RestingLinearThreshold, 0.01f, 0.25f);
-            ImGui::SliderFloat("Resting Angular Threshold", &_system.RestingAngularThreshold, 0.01f, 0.5f);
-            ImGui::SliderFloat("Sleep Time Threshold", &_system.SleepTimeThreshold, 0.05f, 1.5f);
-        }
+        ImGui::Separator();
 
-        if (ImGui::CollapsingHeader("Interaction", ImGuiTreeNodeFlags_DefaultOpen)) {
-            int maxBody   = std::max(0, static_cast<int>(_system.Bodies.size()) - 1);
-            _selectedBody = std::clamp(_selectedBody, 0, maxBody);
-            ImGui::SliderInt("Selected Body", &_selectedBody, 0, maxBody);
-            ImGui::SliderFloat("Impulse Strength", &_userImpulse, 0.f, 20.f);
-            ImGui::Checkbox("Auto Kick On Reset", &_autoApplyKick);
-            ImGui::Checkbox("Show Wireframe", &_showWireframe);
-            ImGui::Checkbox("Show Impulse Arrow", &_showImpulseViz);
-            ImGui::SliderFloat("Impulse Viz Duration", &_impulseVizDuration, 0.2f, 3.0f);
-            ImGui::SliderFloat("Impulse Viz Scale", &_impulseVizScale, 0.05f, 0.6f);
+        int const   maxBody = std::max(0, static_cast<int>(_system.Bodies.size()) - 1);
+        _selectedBody       = std::clamp(_selectedBody, 0, maxBody);
+        ImGui::SliderInt("Selected Body", &_selectedBody, 0, maxBody);
+        ImGui::SliderFloat("Impulse Strength", &_userImpulse, 0.f, 20.f);
 
-            if (_selectedBody < static_cast<int>(_system.Bodies.size())) {
-                auto & b = _system.Bodies[_selectedBody];
-                ImGui::SeparatorText("Velocity Controls (Req1)");
-                bool edited = false;
-                edited |= ImGui::SliderFloat("Linear Vx", &b.V.x(), -12.f, 12.f);
-                edited |= ImGui::SliderFloat("Linear Vy", &b.V.y(), -12.f, 12.f);
-                edited |= ImGui::SliderFloat("Linear Vz", &b.V.z(), -12.f, 12.f);
-                edited |= ImGui::SliderFloat("Angular Wx", &b.W.x(), -20.f, 20.f);
-                edited |= ImGui::SliderFloat("Angular Wy", &b.W.y(), -20.f, 20.f);
-                edited |= ImGui::SliderFloat("Angular Wz", &b.W.z(), -20.f, 20.f);
-                if (edited) {
-                    b.Sleeping   = false;
-                    b.SleepTimer = 0.f;
-                }
-                ImGui::Text("Sleeping: %s", b.Sleeping ? "Yes" : "No");
+        if (_selectedBody < static_cast<int>(_system.Bodies.size())) {
+            auto &  b      = _system.Bodies[_selectedBody];
+            bool    edited = false;
+            edited |= ImGui::SliderFloat("Linear Vx", &b.V.x(), -12.f, 12.f);
+            edited |= ImGui::SliderFloat("Linear Vy", &b.V.y(), -12.f, 12.f);
+            edited |= ImGui::SliderFloat("Linear Vz", &b.V.z(), -12.f, 12.f);
+            edited |= ImGui::SliderFloat("Angular Wx", &b.W.x(), -20.f, 20.f);
+            edited |= ImGui::SliderFloat("Angular Wy", &b.W.y(), -20.f, 20.f);
+            edited |= ImGui::SliderFloat("Angular Wz", &b.W.z(), -20.f, 20.f);
+            if (edited) {
+                b.Sleeping   = false;
+                b.SleepTimer = 0.f;
             }
-
-            auto applySelectedImpulse = [&](Eigen::Vector3f const & dir) {
-                if (_selectedBody >= static_cast<int>(_system.Bodies.size())) {
-                    return;
-                }
-                auto & b = _system.Bodies[_selectedBody];
-                applyImpulseWithViz(_selectedBody, b.X, _userImpulse * dir);
-            };
-
-            if (ImGui::Button("Impulse +X")) applySelectedImpulse(Eigen::Vector3f(1.f, 0.f, 0.f));
-            ImGui::SameLine();
-            if (ImGui::Button("Impulse -X")) applySelectedImpulse(Eigen::Vector3f(-1.f, 0.f, 0.f));
-
-            if (ImGui::Button("Impulse +Y")) applySelectedImpulse(Eigen::Vector3f(0.f, 1.f, 0.f));
-            ImGui::SameLine();
-            if (ImGui::Button("Impulse -Y")) applySelectedImpulse(Eigen::Vector3f(0.f, -1.f, 0.f));
-
-            if (ImGui::Button("Impulse +Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, 1.f));
-            ImGui::SameLine();
-            if (ImGui::Button("Impulse -Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, -1.f));
         }
 
-        ImGui::Text("Bodies: %d", static_cast<int>(_system.Bodies.size()));
-        ImGui::Text("Contacts: %d", static_cast<int>(_system.Contacts.size()));
-        ImGui::Text("Joints: %d", static_cast<int>(_system.Joints.size()));
-        if (_hasImpulseViz) {
-            float const mag = _lastImpulseVector.norm();
-            ImGui::Text("Last User Impulse |J|: %.3f", mag);
-        }
+        auto applySelectedImpulse = [&](Eigen::Vector3f const & dir) {
+            if (_selectedBody >= static_cast<int>(_system.Bodies.size())) {
+                return;
+            }
+            auto & b = _system.Bodies[_selectedBody];
+            applyImpulseWithViz(_selectedBody, b.X, _userImpulse * dir);
+        };
+
+        if (ImGui::Button("Impulse +X")) applySelectedImpulse(Eigen::Vector3f(1.f, 0.f, 0.f));
+        ImGui::SameLine();
+        if (ImGui::Button("Impulse -X")) applySelectedImpulse(Eigen::Vector3f(-1.f, 0.f, 0.f));
+
+        if (ImGui::Button("Impulse +Y")) applySelectedImpulse(Eigen::Vector3f(0.f, 1.f, 0.f));
+        ImGui::SameLine();
+        if (ImGui::Button("Impulse -Y")) applySelectedImpulse(Eigen::Vector3f(0.f, -1.f, 0.f));
+
+        if (ImGui::Button("Impulse +Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, 1.f));
+        ImGui::SameLine();
+        if (ImGui::Button("Impulse -Z")) applySelectedImpulse(Eigen::Vector3f(0.f, 0.f, -1.f));
+
+        ImGui::Separator();
+        ImGui::SliderFloat("Gravity", &_system.Gravity, 0.f, 20.f);
     }
 
     Common::CaseRenderResult CasePlayground::OnRender(std::pair<std::uint32_t, std::uint32_t> const desiredSize) {
@@ -422,10 +392,15 @@ namespace VCX::Labs::RigidBody {
         _system.EnableCCD             = false;
         _system.EnableSchurComplement = false;
 
-        int a               = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(-1.7f, 0.1f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
-        int b               = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(1.6f, 0.0f, 0.f), Eigen::Quaternionf(0.91f, 0.2f, 0.35f, 0.1f).normalized(), 1.2f, false);
-        _system.Bodies[a].V = Eigen::Vector3f(1.5f, 0.f, 0.f);
-        _system.Bodies[b].V = Eigen::Vector3f(-1.2f, 0.f, 0.f);
+        Eigen::Quaternionf const qLead =
+            Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f(1.f, 1.f, 1.f).normalized(), Eigen::Vector3f(1.f, 0.f, 0.f)).normalized();
+
+        int a = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(-1.22f, 0.f, 0.f), qLead, 1.2f, false);
+        int b = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(1.38f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
+        _system.Bodies[a].V = Eigen::Vector3f(2.0f, 0.f, 0.f);
+        _system.Bodies[b].V = Eigen::Vector3f(-1.5f, 0.f, 0.f);
+        _system.Bodies[a].W.setZero();
+        _system.Bodies[b].W.setZero();
     }
 
     void CasePlayground::initDoubleFaceFace() {
@@ -452,9 +427,9 @@ namespace VCX::Labs::RigidBody {
         _timeScale = 0.9f;
         _substeps  = 2;
 
-        int const ground = _system.AddBox(Eigen::Vector3f(14.f, 0.4f, 14.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        int const wallL  = _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(-5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        int const wallR  = _system.AddBox(Eigen::Vector3f(0.3f, 6.f, 14.f), Eigen::Vector3f(5.f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const ground = _system.AddBox(Eigen::Vector3f(20.f, 0.4f, 20.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const wallL  = _system.AddBox(Eigen::Vector3f(0.45f, 6.f, 18.f), Eigen::Vector3f(-7.2f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int const wallR  = _system.AddBox(Eigen::Vector3f(0.45f, 6.f, 18.f), Eigen::Vector3f(7.2f, 1.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
 
         _system.Bodies[ground].Restitution = 0.02f;
         _system.Bodies[ground].Friction    = 0.55f;
@@ -463,11 +438,31 @@ namespace VCX::Labs::RigidBody {
         _system.Bodies[wallR].Restitution  = 0.02f;
         _system.Bodies[wallR].Friction     = 0.50f;
 
+        float const hx   = 0.4f;
+        float const step = 2.f * hx + 0.07f;
         for (int i = 0; i < 5; ++i) {
-            int id                         = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(-1.5f + 0.8f * i, 2.5f + 1.0f * i, (i % 2 == 0) ? 0.5f : -0.5f), Eigen::Quaternionf::Identity(), 1.0f, false);
+            int id                         = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(-1.5f + step * i, 2.5f + 1.02f * i, (i % 2 == 0) ? 0.5f : -0.5f), Eigen::Quaternionf::Identity(), 1.0f, false);
             _system.Bodies[id].Restitution = 0.04f;
             _system.Bodies[id].Friction    = 0.45f;
             _system.Bodies[id].W           = Eigen::Vector3f(0.08f * i, 0.03f, -0.05f * i);
+        }
+
+        float const row1Right = -1.5f + step * 4.f + hx;
+        float const row2X0  = row1Right + hx + 0.08f;
+        for (int i = 0; i < 5; ++i) {
+            int id                         = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(row2X0 + step * i, 2.35f + 0.95f * i, 2.45f), Eigen::Quaternionf::Identity(), 1.0f, false);
+            _system.Bodies[id].Restitution = 0.04f;
+            _system.Bodies[id].Friction    = 0.45f;
+            _system.Bodies[id].W           = Eigen::Vector3f(-0.07f * i, 0.035f, -0.04f * i);
+        }
+
+        float const h3   = 0.375f;
+        float const s3   = 2.f * h3 + 0.08f;
+        for (int i = 0; i < 4; ++i) {
+            int id                         = _system.AddBox(Eigen::Vector3f(0.75f, 0.75f, 0.75f), Eigen::Vector3f(-0.55f + s3 * i, 4.15f + 0.58f * i, -2.55f), Eigen::Quaternionf::Identity(), 1.0f, false);
+            _system.Bodies[id].Restitution = 0.04f;
+            _system.Bodies[id].Friction    = 0.45f;
+            _system.Bodies[id].W           = Eigen::Vector3f(0.05f, -0.02f, 0.06f);
         }
     }
 
@@ -494,7 +489,7 @@ namespace VCX::Labs::RigidBody {
         ids.reserve(5);
 
         for (int i = 0; i < 5; ++i) {
-            float const x                  = -1.84f + float(i) * 0.92f;
+            float const x                  = -1.84f + float(i) * 0.93f;
             int const   id                 = _system.AddBox(Eigen::Vector3f(0.9f, 0.9f, 0.9f), Eigen::Vector3f(x, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
             _system.Bodies[id].Restitution = 0.98f;
             _system.Bodies[id].Friction    = 0.02f;
@@ -534,7 +529,7 @@ namespace VCX::Labs::RigidBody {
         _system.Bodies[ground].Restitution = 0.0f;
         _system.Bodies[ground].Friction    = 0.65f;
         for (int i = 0; i < 6; ++i) {
-            float const y                  = -1.5f + 1.02f * i;
+            float const y                  = -1.5f + 1.035f * i;
             int         id                 = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(0.f, y, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
             _system.Bodies[id].Restitution = 0.0f;
             _system.Bodies[id].Friction    = 0.62f;
@@ -560,9 +555,9 @@ namespace VCX::Labs::RigidBody {
         _system.Bodies[ground].Restitution = 0.02f;
         _system.Bodies[ground].Friction    = 0.55f;
 
-        int box                         = _system.AddBox(Eigen::Vector3f(1.4f, 1.0f, 1.2f), Eigen::Vector3f(-2.f, 1.2f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
-        int sph                         = _system.AddSphere(0.55f, Eigen::Vector3f(0.f, 2.5f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        int c                           = _system.AddCylinder(0.45f, 1.3f, Eigen::Vector3f(2.f, 3.0f, 0.f), Eigen::Quaternionf::Identity(), 1.3f, false);
+        int box                         = _system.AddBox(Eigen::Vector3f(1.4f, 1.0f, 1.2f), Eigen::Vector3f(-2.2f, 1.05f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
+        int sph                         = _system.AddSphere(0.55f, Eigen::Vector3f(0.f, 2.75f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        int c                           = _system.AddCylinder(0.45f, 1.3f, Eigen::Vector3f(2.35f, 3.15f, 0.f), Eigen::Quaternionf::Identity(), 1.3f, false);
         _system.Bodies[box].Restitution = 0.10f;
         _system.Bodies[box].Friction    = 0.45f;
         _system.Bodies[sph].Restitution = 0.28f;
@@ -578,10 +573,12 @@ namespace VCX::Labs::RigidBody {
         _system.EnableSchurComplement = true;
         _system.VelocityIterations    = 10;
         _system.PositionIterations    = 3;
+        _system.BaumgarteBeta         = 0.07f;
+        _system.MaxBiasVelocity       = 0.5f;
 
-        _system.AddBox(Eigen::Vector3f(10.f, 0.4f, 10.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        _system.AddBox(Eigen::Vector3f(12.f, 0.4f, 12.f), Eigen::Vector3f(0.f, -2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
         for (int i = 0; i < 6; ++i) {
-            _system.AddBox(Eigen::Vector3f(1.0f, 1.0f, 1.0f), Eigen::Vector3f(-2.f + 0.8f * i, -1.6f + 1.02f * i, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+            _system.AddBox(Eigen::Vector3f(1.0f, 1.0f, 1.0f), Eigen::Vector3f(-2.25f + 1.06f * i, -1.55f + 1.08f * i, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
         }
     }
 
@@ -594,12 +591,19 @@ namespace VCX::Labs::RigidBody {
         _system.AddBox(Eigen::Vector3f(8.f, 0.4f, 8.f), Eigen::Vector3f(0.f, -3.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
 
         int root = _system.AddBox(Eigen::Vector3f(0.5f, 0.5f, 0.5f), Eigen::Vector3f(0.f, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        int prev = root;
+        int   prev       = root;
+        float prevCenter = 0.f;
+        float prevHalfX  = 0.25f;
+        float const gap  = 0.05f;
+        float const linkHalfX = 0.45f;
         for (int i = 0; i < 5; ++i) {
-            int             id = _system.AddBox(Eigen::Vector3f(0.9f, 0.35f, 0.35f), Eigen::Vector3f(0.9f * (i + 1), 2.2f, 0.f), Eigen::Quaternionf::Identity(), 0.8f, false);
-            Eigen::Vector3f jointPos(0.9f * i + 0.45f, 2.2f, 0.f);
+            float const     cx = prevCenter + prevHalfX + gap + linkHalfX;
+            int             id = _system.AddBox(Eigen::Vector3f(0.9f, 0.35f, 0.35f), Eigen::Vector3f(cx, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 0.8f, false);
+            Eigen::Vector3f jointPos(prevCenter + prevHalfX + gap * 0.5f, 2.2f, 0.f);
             _system.AddPointJoint(prev, id, jointPos);
-            prev = id;
+            prev       = id;
+            prevCenter = cx;
+            prevHalfX  = linkHalfX;
         }
     }
 
