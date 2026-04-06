@@ -1,0 +1,225 @@
+% !TEX program = xelatex
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage{amsmath}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\geometry{margin=2cm}
+
+\hypersetup{hidelinks}
+
+\lstset{
+  language=C++,
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{gray!60},
+  stringstyle=\color{teal!70!black},
+  breaklines=true,
+  breakatwhitespace=true,
+  frame=single,
+  framerule=0.4pt,
+  tabsize=2,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\title{Lab1 刚体仿真（VCX）——实现说明}
+\author{学号：2400012935\quad 姓名：陈羿桥\\[0.35em]
+\small 仓库：\url{https://github.com/CharlesChen397/PhySim_VCX}\\[0.15em]
+\small 邮箱：\texttt{charleschen397@gmail.com}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{使用说明}
+\begin{itemize}[leftmargin=*]
+  \item 构建与运行：\texttt{xmake build lab1}，\texttt{xmake run lab1}。
+  \item 物理与约束：\texttt{RigidBodySystem.h/.cpp}。
+  \item 场景与 UI：\texttt{CasePlayground.h/.cpp}。
+  \item 三角网格：\texttt{PrimitiveMesh.cpp}（\texttt{BuildBodyMesh}）。
+\end{itemize}
+
+\section{Task 1}
+平动为显式欧拉：重力与 \texttt{Force} 合成线加速度后积分 \texttt{V}、\texttt{X}。转动在体坐标下由 \texttt{InertiaBodyInv} 还原对角惯量，变到世界系得 $\mathbf{L}=\mathbf{I}\boldsymbol{\omega}$，欧拉方程 $\dot{\boldsymbol{\omega}}=\mathbf{I}^{-1}(\boldsymbol{\tau}-\boldsymbol{\omega}\times\mathbf{L})$。四元数用纯虚部 \texttt{wq} 与当前 \texttt{Q} 相乘，系数加 \texttt{0.5*dt} 项后归一化。\texttt{Fixed}/\texttt{Sleeping} 体跳过积分。
+
+接触点冲量：$\Delta\mathbf{v}=\mathbf{J}/m$，$\Delta\boldsymbol{\omega}=\mathbf{I}^{-1}\mathbf{r}\times\mathbf{J}$。
+
+\begin{lstlisting}
+void RigidBodySystem::integrateBodies(float dt) {
+  for (auto & body : Bodies) {
+    if (body.Fixed || body.Sleeping) continue;
+    Eigen::Vector3f const gravityAccel(0.f, -Gravity, 0.f);
+    Eigen::Vector3f const linearAccel = gravityAccel + body.Force * body.InvMass;
+    body.V += linearAccel * dt;
+    body.X += body.V * dt;
+    Eigen::Matrix3f const R = body.Q.normalized().toRotationMatrix();
+    Eigen::Matrix3f Ibody = Eigen::Matrix3f::Zero();
+    for (int i = 0; i < 3; ++i) {
+      float const invIi = body.InertiaBodyInv(i, i);
+      if (std::abs(invIi) > 1e-12f) Ibody(i, i) = 1.f / invIi;
+    }
+    Eigen::Matrix3f const Iworld = R * Ibody * R.transpose();
+    Eigen::Vector3f const L = Iworld * body.W;
+    Eigen::Vector3f const tauNet = body.Torque - body.W.cross(L);
+    Eigen::Vector3f const angularAccel = body.GetWorldInvInertia() * tauNet;
+    body.W += angularAccel * dt;
+    Eigen::Quaternionf const wq(0.f, body.W.x(), body.W.y(), body.W.z());
+    body.Q.coeffs() += (0.5f * dt * (wq * body.Q).coeffs());
+    body.Q.normalize();
+  }
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+void RigidBody::ApplyImpulse(Eigen::Vector3f const & worldPoint,
+                             Eigen::Vector3f const & impulse) {
+  if (Fixed) return;
+  Sleeping = false;
+  SleepTimer = 0.f;
+  V += impulse * InvMass;
+  Eigen::Vector3f const r = worldPoint - X;
+  W += GetWorldInvInertia() * r.cross(impulse);
+}
+\end{lstlisting}
+
+\section{Task 2}
+\texttt{createGeometry} 按 \texttt{ShapeType} 构造 \texttt{fcl::Box}（及 Bonus 中的球、柱），\texttt{createTransform} 把质心位置与四元数转成 FCL 位姿；\texttt{collidePair} 用 \texttt{fcl::collide}，\texttt{maxContact} 控制返回接触数。
+
+\texttt{detectCollisions} 把 FCL 法向与 $\overrightarrow{AB}$ 点积为负时翻转，使法向恒从体 \texttt{i} 指向体 \texttt{j}；恢复系数取两体最小值，避免一侧无弹性时被另一侧抬高。
+
+速度级约束用多轮 Gauss--Seidel：相对法向速度 $v_n$，Baumgarte 把穿透误差压进 \texttt{biasVel}；有效质量 \texttt{effMass} 含平动与转动耦合。法向冲量 \texttt{jn} 非负。切向用 Coulomb 锥，\texttt{frictionNormal} 用 \texttt{jn} 减去由 \texttt{biasVel} 贡献的部分，避免深穿透时摩擦过大。
+
+\begin{lstlisting}
+bool collidePair(RigidBody const & a, RigidBody const & b,
+    Eigen::Vector3f const & xa, Eigen::Quaternionf const & qa,
+    Eigen::Vector3f const & xb, Eigen::Quaternionf const & qb,
+    fcl::CollisionResult<float> & result, int maxContact = 4) {
+  auto geomA = createGeometry(a);
+  auto geomB = createGeometry(b);
+  fcl::CollisionObject<float> objA(geomA, createTransform(xa, qa));
+  fcl::CollisionObject<float> objB(geomB, createTransform(xb, qb));
+  fcl::CollisionRequest<float> request(maxContact, true);
+  result.clear();
+  fcl::collide(&objA, &objB, request, result);
+  return result.isCollision();
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+Eigen::Vector3f const ab = Bodies[j].X - Bodies[i].X;
+if (ab.dot(n) < 0.f) n = -n;
+contact.Restitution = std::min(Bodies[i].Restitution, Bodies[j].Restitution);
+\end{lstlisting}
+
+\begin{lstlisting}
+float jn = (-(1.f + restitution) * vn + biasVel) / effMass;
+jn = std::max(0.f, jn);
+float const frictionNormal = std::max(0.f, jn - biasImpulsePart);
+jt = std::clamp(jt, -maxFrictionImpulse, maxFrictionImpulse);
+\end{lstlisting}
+
+\section{Task 3}
+单步仿真顺序如下：若开启重叠松弛，先在积分前按穿透深度把重叠体沿法向推开一小步；保存上一帧位姿供连续碰撞检测；对全体刚体做显式积分；若开启 CCD，在高速接近且尚未穿透时用插值二分把状态回拨到首次接触时刻；再对所有刚体对做 FCL 碰撞检测生成接触；解约束时若走 Schur 路径，则接触与关节的法向乘子在同一线性系统里一次解出，否则先顺序解接触再顺序解关节；随后做位置穿透修正与静置接触稳定；最后清空本步外力累加器。
+
+重叠松弛按接触深度与两体逆质量比例分配位移，并对单步修正量设上限，减弱初始堆叠穿透带来的数值冲击。
+
+\begin{lstlisting}
+void RigidBodySystem::Step(float dt) {
+  if (dt <= 0.f || Bodies.empty()) return;
+  if (RelaxOverlapsBeforeIntegrate) relaxOverlappingPositions();
+  _prevStates.resize(Bodies.size());
+  for (std::size_t i = 0; i < Bodies.size(); ++i)
+    _prevStates[i] = BodyState { .X = Bodies[i].X, .Q = Bodies[i].Q };
+  integrateBodies(dt);
+  if (EnableCCD) continuousCollisionPass(dt);
+  detectCollisions();
+  if (EnableSchurComplement) solveContactsSchur(dt);
+  else { solveContactsSequential(dt); solveJointsSequential(dt); }
+  solvePositionCorrection();
+  stabilizeRestingContacts(dt);
+  for (auto & body : Bodies) body.ClearAccumulators();
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+Eigen::Vector3f const corr = (relaxFactor * depth / invMassSum) * c.Normal;
+if (!a.Fixed) a.X -= a.InvMass * corr;
+if (!b.Fixed) b.X += b.InvMass * corr;
+\end{lstlisting}
+
+\section{Bonus B1}
+一排立方体高弹性、低摩擦；仿真开始后首块可自动获得一次侧向冲量，动量沿接触链传递。
+
+\section{Bonus B2}
+地面上的多层立方体：零恢复、高摩擦；依赖子步数与位置迭代抑制穿透与抖动。
+
+\section{Bonus B3}
+FCL 使用球、柱碰撞体；惯量按球、柱解析公式写入对角逆。渲染用 \texttt{BuildBodyMesh} 为球、柱生成三角网格。
+
+\begin{lstlisting}
+MeshData BuildBodyMesh(RigidBody const & body) {
+  switch (body.Shape) {
+  case ShapeType::Box: return buildBox(body);
+  case ShapeType::Sphere: return buildSphere(body);
+  case ShapeType::Cylinder: return buildCylinder(body);
+  }
+  return buildBox(body);
+}
+\end{lstlisting}
+
+\section{Bonus B4}
+Schur 路径下，每个接触与每个关节轴对应一行约束：行内有世界系法向、力臂与右端项（含恢复系数与法向速度、Baumgarte 穿透修正；接近静止时削弱穿透项）。全局矩阵 $\mathbf{A}$ 的元素由两体逆质量与逆惯量对行对行的耦合构成；对角加小正则后用 LDLT 解乘子向量。单边行做 $\lambda\ge 0$ 投影，并对法向乘子按质量、重力与时间步设上限，避免单步冲量过大。
+
+\begin{lstlisting}
+A += 2e-4f * Eigen::MatrixXf::Identity(m, m);
+Eigen::VectorXf lambda = A.ldlt().solve(-b);
+for (int i = 0; i < m; ++i) {
+  float li = lambda(i);
+  if (rows[i].Unilateral) {
+    li = std::max(0.f, li);
+    float capRest = mDyn * gEff * std::max(dt, 1e-5f) * SchurImpulseGravityMult;
+    // ... 碰撞态放大 cap ...
+    li = std::min(li, cap);
+  }
+  Eigen::Vector3f const impulse = li * rows[i].N;
+  Bodies[rows[i].A].ApplyImpulse(rows[i].Point, -impulse);
+  Bodies[rows[i].B].ApplyImpulse(rows[i].Point, impulse);
+}
+\end{lstlisting}
+
+\section{Bonus B5}
+铰链在数据结构中保存两刚体上的局部锚点；由世界坐标锚点写入时，用当前姿态转到体坐标。顺序求解时构造 $3\times3$ 有效质量矩阵（含平动与转动耦合），右端为锚点相对速度叠加 Baumgarte 位置误差，LDLT 解出空间冲量并施加在两锚点。与 Schur 合解时，同一关节在世界系三个坐标轴上各对应一行，与接触行拼成同一矩阵。
+
+\begin{lstlisting}
+Eigen::Matrix3f K = (a.InvMass + b.InvMass) * Eigen::Matrix3f::Identity();
+K -= skew(ra) * invIA * skew(ra);
+K -= skew(rb) * invIB * skew(rb);
+Eigen::Vector3f const rhs = -(rv + beta * err / std::max(dt, 1e-6f));
+Eigen::Vector3f const impulse = K.ldlt().solve(rhs);
+a.ApplyImpulse(pa, -impulse);
+b.ApplyImpulse(pb, impulse);
+\end{lstlisting}
+
+\section{Bonus B6}
+当相对平移 $\|\mathbf{v}_i-\mathbf{v}_j\|\Delta t$ 超过尺度阈值、且上一帧与当前帧 FCL 均未报告穿透时，在插值参数 $t\in[0,1]$ 上对 $\mathbf{x}$ 线性插值、对 $\mathbf{q}$ \texttt{slerp}，二分求最早发生碰撞的 $t$，将两体位姿回退到接触前一刻。
+
+\begin{lstlisting}
+Eigen::Vector3f const xi = _prevStates[i].X + mid * (Bodies[i].X - _prevStates[i].X);
+Eigen::Vector3f const xj = _prevStates[j].X + mid * (Bodies[j].X - _prevStates[j].X);
+Eigen::Quaternionf const qi = _prevStates[i].Q.slerp(mid, Bodies[i].Q).normalized();
+Eigen::Quaternionf const qj = _prevStates[j].Q.slerp(mid, Bodies[j].Q).normalized();
+bool midCollide = collidePair(Bodies[i], Bodies[j], xi, qi, xj, qj, midResult, 1);
+\end{lstlisting}
+
+\section{用户输入与冲量}
+左侧面板：下拉框切换场景；\textbf{Reset Preset} 重置当前场景；\textbf{Start/Stop Simulation} 启停仿真。\textbf{Selected Body} 选择受力刚体编号；\textbf{Impulse Strength} 调节冲量大小；六个滑条分别调节该体的线速度三分量与角速度三分量；六个 \textbf{Impulse $\pm$X/Y/Z} 按钮沿世界坐标轴对质心施加一次冲量；\textbf{Gravity} 调节重力加速度。
+
+鼠标：在画面获得焦点且已选中非固定刚体时，按住拖动会通过相机位移换算成作用在该体质心上的冲量（力度与拖动幅度相关）。
+
+键盘：在画面获得焦点时，\textbf{J/L} 沿 $\pm X$，\textbf{I/K} 沿 $\mp Z$，\textbf{U/O} 沿 $\pm Y$ 各施一次冲量，大小由 \textbf{Impulse Strength} 决定。
+
+\end{document}

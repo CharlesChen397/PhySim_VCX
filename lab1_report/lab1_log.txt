@@ -1,3 +1,14 @@
+commit 2f355c5c4f8a741804c5c6073a4e3a775897861d
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Mon Apr 6 20:37:08 2026 +0800
+
+    docs: refresh lab1_log.txt after report PDF commit.
+    
+    Made-with: Cursor
+
+ lab1_log.txt | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
 commit d63089776b4b6de3a58537efa3b7783b8f1f475d
 Author: 陈羿桥 <charleschen397@gmail.com>
 Date:   Mon Apr 6 20:37:02 2026 +0800

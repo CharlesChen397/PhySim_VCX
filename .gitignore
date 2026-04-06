@@ -10,3 +10,19 @@ vsxmake*
 docs/html
 docs/latex
 .DS_Store
+
+# LaTeX 中间文件（由 compile_lab1_pdf.sh 生成 PDF 后删除）
+lab1_report.aux
+lab1_report.log
+lab1_report.out
+lab1_report.toc
+lab1_report.synctex.gz
+
+# lab1_report/ 子目录内 LaTeX 辅助文件与演示视频（视频随作业 zip 提交即可）
+lab1_report/lab1_report.aux
+lab1_report/lab1_report.log
+lab1_report/lab1_report.out
+lab1_report/lab1_report.toc
+lab1_report/lab1_report.synctex.gz
+lab1_report/*.mp4
+lab1_report/*.webm
