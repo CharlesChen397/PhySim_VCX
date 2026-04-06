@@ -1,3 +1,26 @@
+commit d63089776b4b6de3a58537efa3b7783b8f1f475d
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Mon Apr 6 20:37:02 2026 +0800
+
+    docs: fill lab1 report author info and add compiled PDF (学号 2400012935).
+    
+    Made-with: Cursor
+
+ lab1_report.pdf | Bin 0 -> 206894 bytes
+ lab1_report.tex |   8 ++++++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+commit e3dd3f0f12596b70e16b950d933db4ced32e1b9c
+Author: Lab1 Student <lab1@phyisim.local>
+Date:   Mon Apr 6 20:29:34 2026 +0800
+
+    docs: add lab1_log.txt (git log --stat) for course submission packaging.
+    
+    Made-with: Cursor
+
+ lab1_log.txt | 261 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 261 insertions(+)
+
 commit 27bdafb017f431639ac103f520bff054f7410801
 Author: Lab1 Student <lab1@phyisim.local>
 Date:   Mon Apr 6 20:29:27 2026 +0800
