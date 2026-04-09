@@ -48,14 +48,14 @@ namespace VCX::Labs::RigidBody {
 
         ImGui::Separator();
 
-        int const   maxBody = std::max(0, static_cast<int>(_system.Bodies.size()) - 1);
-        _selectedBody       = std::clamp(_selectedBody, 0, maxBody);
+        int const maxBody = std::max(0, static_cast<int>(_system.Bodies.size()) - 1);
+        _selectedBody     = std::clamp(_selectedBody, 0, maxBody);
         ImGui::SliderInt("Selected Body", &_selectedBody, 0, maxBody);
         ImGui::SliderFloat("Impulse Strength", &_userImpulse, 0.f, 20.f);
 
         if (_selectedBody < static_cast<int>(_system.Bodies.size())) {
-            auto &  b      = _system.Bodies[_selectedBody];
-            bool    edited = false;
+            auto & b      = _system.Bodies[_selectedBody];
+            bool   edited = false;
             edited |= ImGui::SliderFloat("Linear Vx", &b.V.x(), -12.f, 12.f);
             edited |= ImGui::SliderFloat("Linear Vy", &b.V.y(), -12.f, 12.f);
             edited |= ImGui::SliderFloat("Linear Vz", &b.V.z(), -12.f, 12.f);
@@ -292,9 +292,9 @@ namespace VCX::Labs::RigidBody {
     void CasePlayground::resetPreset() {
         _presetDirty = false;
         _system.Clear();
-        _stopped       = true;
-        _timeScale     = 1.f;
-        _substeps      = 1;
+        _stopped   = true;
+        _timeScale = 1.f;
+        _substeps  = 1;
         // Reset solver knobs to a deterministic baseline before each preset.
         _system.Gravity                      = 0.f;
         _system.EnableCCD                    = true;
@@ -388,8 +388,8 @@ namespace VCX::Labs::RigidBody {
         Eigen::Quaternionf const qLead =
             Eigen::Quaternionf::FromTwoVectors(Eigen::Vector3f(1.f, 1.f, 1.f).normalized(), Eigen::Vector3f(1.f, 0.f, 0.f)).normalized();
 
-        int a = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(-1.22f, 0.f, 0.f), qLead, 1.2f, false);
-        int b = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(1.38f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
+        int a               = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(-1.22f, 0.f, 0.f), qLead, 1.2f, false);
+        int b               = _system.AddBox(Eigen::Vector3f(1.f, 1.f, 1.f), Eigen::Vector3f(1.38f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.2f, false);
         _system.Bodies[a].V = Eigen::Vector3f(2.0f, 0.f, 0.f);
         _system.Bodies[b].V = Eigen::Vector3f(-1.5f, 0.f, 0.f);
         _system.Bodies[a].W.setZero();
@@ -443,7 +443,7 @@ namespace VCX::Labs::RigidBody {
         }
 
         float const row1Right = -1.5f + step * 4.f + hx;
-        float const row2X0  = row1Right + hx + 0.08f;
+        float const row2X0    = row1Right + hx + 0.08f;
         for (int i = 0; i < 5; ++i) {
             int id                         = _system.AddBox(Eigen::Vector3f(0.8f, 0.8f, 0.8f), Eigen::Vector3f(row2X0 + step * i, 2.35f + 0.95f * i, 2.45f), Eigen::Quaternionf::Identity(), 1.0f, false);
             _system.Bodies[id].Restitution = 0.04f;
@@ -451,8 +451,8 @@ namespace VCX::Labs::RigidBody {
             _system.Bodies[id].W           = Eigen::Vector3f(-0.07f * i, 0.035f, -0.04f * i);
         }
 
-        float const h3   = 0.375f;
-        float const s3   = 2.f * h3 + 0.08f;
+        float const h3 = 0.375f;
+        float const s3 = 2.f * h3 + 0.08f;
         for (int i = 0; i < 4; ++i) {
             int id                         = _system.AddBox(Eigen::Vector3f(0.75f, 0.75f, 0.75f), Eigen::Vector3f(-0.55f + s3 * i, 4.15f + 0.58f * i, -2.55f), Eigen::Quaternionf::Identity(), 1.0f, false);
             _system.Bodies[id].Restitution = 0.04f;
@@ -485,7 +485,7 @@ namespace VCX::Labs::RigidBody {
         Eigen::Vector3f const boxDim(0.9f, 0.55f, 0.55f);
         float const           hx = 0.5f * boxDim.x();
 
-        int ids[5];
+        int         ids[5];
         float const gap0 = 0.06f;
         ids[1]           = _system.AddBox(boxDim, Eigen::Vector3f(0.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
         ids[2]           = _system.AddBox(boxDim, Eigen::Vector3f(hx * 2.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
@@ -496,7 +496,7 @@ namespace VCX::Labs::RigidBody {
         ids[0]               = _system.AddBox(boxDim, Eigen::Vector3f(strikerX, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
 
         for (int i = 0; i < 5; ++i) {
-            auto & b = _system.Bodies[ids[i]];
+            auto & b      = _system.Bodies[ids[i]];
             b.Restitution = 0.992f;
             b.Friction    = 0.f;
             b.W.setZero();
@@ -589,12 +589,12 @@ namespace VCX::Labs::RigidBody {
 
         _system.AddBox(Eigen::Vector3f(8.f, 0.4f, 8.f), Eigen::Vector3f(0.f, -3.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
 
-        int root = _system.AddBox(Eigen::Vector3f(0.5f, 0.5f, 0.5f), Eigen::Vector3f(0.f, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        int   prev       = root;
-        float prevCenter = 0.f;
-        float prevHalfX  = 0.25f;
-        float const gap  = 0.05f;
-        float const linkHalfX = 0.45f;
+        int         root       = _system.AddBox(Eigen::Vector3f(0.5f, 0.5f, 0.5f), Eigen::Vector3f(0.f, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
+        int         prev       = root;
+        float       prevCenter = 0.f;
+        float       prevHalfX  = 0.25f;
+        float const gap        = 0.05f;
+        float const linkHalfX  = 0.45f;
         for (int i = 0; i < 5; ++i) {
             float const     cx = prevCenter + prevHalfX + gap + linkHalfX;
             int             id = _system.AddBox(Eigen::Vector3f(0.9f, 0.35f, 0.35f), Eigen::Vector3f(cx, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 0.8f, false);
