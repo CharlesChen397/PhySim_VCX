@@ -98,10 +98,6 @@ namespace VCX::Labs::RigidBody {
         }
 
         applyUserInteraction(Engine::GetDeltaTime());
-        if (! _stopped && _b1KickPending && _b1KickBodyId >= 0 && _b1KickBodyId < static_cast<int>(_system.Bodies.size())) {
-            applyImpulseWithViz(_b1KickBodyId, _system.Bodies[_b1KickBodyId].X, Eigen::Vector3f(2.4f, 0.f, 0.f));
-            _b1KickPending = false;
-        }
         if (! _stopped) {
             stepSimulation(Engine::GetDeltaTime());
         }
@@ -299,9 +295,6 @@ namespace VCX::Labs::RigidBody {
         _stopped       = true;
         _timeScale     = 1.f;
         _substeps      = 1;
-        _b1KickPending = false;
-        _b1KickBodyId  = -1;
-
         // Reset solver knobs to a deterministic baseline before each preset.
         _system.Gravity                      = 0.f;
         _system.EnableCCD                    = true;
@@ -470,42 +463,46 @@ namespace VCX::Labs::RigidBody {
         _system.Gravity                      = 0.f;
         _system.EnableCCD                    = false;
         _system.EnableSchurComplement        = false;
-        _system.VelocityIterations           = 32;
-        _system.PositionIterations           = 6;
-        _system.BaumgarteBeta                = 0.16f;
-        _system.PenetrationSlop              = 6e-4f;
-        _system.RestitutionVelocityThreshold = 0.05f;
-        _system.RestingLinearThreshold       = 0.03f;
-        _system.RestingAngularThreshold      = 0.05f;
-        _system.SleepTimeThreshold           = 1.0f;
+        _system.RelaxOverlapsBeforeIntegrate = true;
+        _system.VelocityIterations           = 48;
+        _system.PositionIterations           = 8;
+        _system.BaumgarteBeta                = 0.08f;
+        _system.MaxBiasVelocity              = 0.45f;
+        _system.PenetrationSlop              = 4e-4f;
+        _system.RestitutionVelocityThreshold = 0.f;
+        _system.RestingLinearThreshold       = 0.02f;
+        _system.RestingAngularThreshold      = 0.04f;
+        _system.SleepTimeThreshold           = 1.2f;
 
-        _timeScale          = 0.35f;
-        _substeps           = 4;
+        _timeScale          = 0.42f;
+        _substeps           = 3;
         _showImpulseViz     = true;
-        _impulseVizScale    = std::max(_impulseVizScale, 0.3f);
-        _impulseVizDuration = std::max(_impulseVizDuration, 1.4f);
+        _impulseVizScale    = std::max(_impulseVizScale, 0.28f);
+        _impulseVizDuration = std::max(_impulseVizDuration, 1.2f);
 
-        std::vector<int> ids;
-        ids.reserve(5);
+        Eigen::Vector3f const boxDim(0.9f, 0.55f, 0.55f);
+        float const           hx = 0.5f * boxDim.x();
+
+        int ids[5];
+        float const gap0 = 0.06f;
+        ids[1]           = _system.AddBox(boxDim, Eigen::Vector3f(0.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+        ids[2]           = _system.AddBox(boxDim, Eigen::Vector3f(hx * 2.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+        ids[3]           = _system.AddBox(boxDim, Eigen::Vector3f(4.f * hx, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+        ids[4]           = _system.AddBox(boxDim, Eigen::Vector3f(6.f * hx, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+
+        float const strikerX = -2.f * hx - gap0;
+        ids[0]               = _system.AddBox(boxDim, Eigen::Vector3f(strikerX, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
 
         for (int i = 0; i < 5; ++i) {
-            float const x                  = -1.84f + float(i) * 0.93f;
-            int const   id                 = _system.AddBox(Eigen::Vector3f(0.9f, 0.9f, 0.9f), Eigen::Vector3f(x, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
-            _system.Bodies[id].Restitution = 0.98f;
-            _system.Bodies[id].Friction    = 0.02f;
-            _system.Bodies[id].W.setZero();
-            ids.push_back(id);
+            auto & b = _system.Bodies[ids[i]];
+            b.Restitution = 0.992f;
+            b.Friction    = 0.f;
+            b.W.setZero();
+            b.V.setZero();
         }
+        _system.Bodies[ids[0]].V = Eigen::Vector3f(4.2f, 0.f, 0.f);
 
-        if (! ids.empty()) {
-            _selectedBody  = ids.front();
-            _b1KickBodyId  = ids.front();
-            _b1KickPending = _autoApplyKick;
-        } else {
-            _selectedBody  = 0;
-            _b1KickBodyId  = -1;
-            _b1KickPending = false;
-        }
+        _selectedBody = ids[0];
     }
 
     void CasePlayground::initBonusStacking() {

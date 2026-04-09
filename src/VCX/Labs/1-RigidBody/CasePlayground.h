@@ -53,7 +53,6 @@ namespace VCX::Labs::RigidBody {
         bool   _presetDirty { true };
         bool   _showWireframe { true };
         bool   _showImpulseViz { true };
-        bool   _autoApplyKick { true };
         float  _timeScale { 1.f };
         int    _substeps { 1 };
 
@@ -66,9 +65,6 @@ namespace VCX::Labs::RigidBody {
         float           _impulseVizTimer { 0.f };
         Eigen::Vector3f _lastImpulsePoint { 0.f, 0.f, 0.f };
         Eigen::Vector3f _lastImpulseVector { 0.f, 0.f, 0.f };
-
-        bool _b1KickPending { false };
-        int  _b1KickBodyId { -1 };
 
         std::array<char const *, 11> const _presetNames {
             "Base: Single Rigid Body",
