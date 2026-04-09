@@ -87,26 +87,17 @@ void RigidBody::ApplyImpulse(Eigen::Vector3f const & worldPoint,
 \end{lstlisting}
 
 \section{Task 2}
-\texttt{createGeometry} 按 \texttt{ShapeType} 构造 \texttt{fcl::Box}（及 Bonus 中的球、柱），\texttt{createTransform} 把质心位置与四元数转成 FCL 位姿；\texttt{collidePair} 用 \texttt{fcl::collide}，\texttt{maxContact} 控制返回接触数。
+\texttt{createGeometry} 按 \texttt{ShapeType} 构造 \texttt{fcl::Box}、\texttt{fcl::Sphere}、\texttt{fcl::Cylinder}。\textbf{圆柱与 FCL 约定对齐：} FCL 的 \texttt{Cylinder} 对称轴为局部 $+z$，而本工程惯量与 \texttt{PrimitiveMesh::buildCylinder} 以局部 $+y$ 为轴；\texttt{createTransform} 对圆柱在体姿态右乘固定旋转（绕 $x$ 旋转 $-90^\circ$），使 FCL 局部与体轴一致，避免碰撞体与网格错位。
 
-\texttt{detectCollisions} 把 FCL 法向与 $\overrightarrow{AB}$ 点积为负时翻转，使法向恒从体 \texttt{i} 指向体 \texttt{j}；恢复系数取两体最小值，避免一侧无弹性时被另一侧抬高。
+\texttt{collidePair} 用 \texttt{fcl::collide}，\texttt{maxContact} 控制返回接触数；\texttt{createTransform(x, q, shape)} 按形状决定是否附加圆柱对齐旋转。
+
+\texttt{detectCollisions} 在写入接触列表前经 \texttt{appendContactsForPair}：若同一对刚体返回的多个接触法向彼此几乎平行（点积 $\ge 0.985$），则合并为\textbf{单点}——法向为法向和的单位化，接触点为位置平均，穿透取最大。用于抑制面--面接触时多点顺序冲量造成的虚假角速度；法向仍按 $\overrightarrow{AB}$ 与法向一致性统一为从 \texttt{i} 指向 \texttt{j}。恢复系数取两体最小值。
 
 速度级约束用多轮 Gauss--Seidel：相对法向速度 $v_n$，Baumgarte 把穿透误差压进 \texttt{biasVel}；有效质量 \texttt{effMass} 含平动与转动耦合。法向冲量 \texttt{jn} 非负。切向用 Coulomb 锥，\texttt{frictionNormal} 用 \texttt{jn} 减去由 \texttt{biasVel} 贡献的部分，避免深穿透时摩擦过大。
 
 \begin{lstlisting}
-bool collidePair(RigidBody const & a, RigidBody const & b,
-    Eigen::Vector3f const & xa, Eigen::Quaternionf const & qa,
-    Eigen::Vector3f const & xb, Eigen::Quaternionf const & qb,
-    fcl::CollisionResult<float> & result, int maxContact = 4) {
-  auto geomA = createGeometry(a);
-  auto geomB = createGeometry(b);
-  fcl::CollisionObject<float> objA(geomA, createTransform(xa, qa));
-  fcl::CollisionObject<float> objB(geomB, createTransform(xb, qb));
-  fcl::CollisionRequest<float> request(maxContact, true);
-  result.clear();
-  fcl::collide(&objA, &objB, request, result);
-  return result.isCollision();
-}
+fcl::CollisionObject<float> objA(geomA, createTransform(xa, qa, a.Shape));
+fcl::CollisionObject<float> objB(geomB, createTransform(xb, qb, b.Shape));
 \end{lstlisting}
 
 \begin{lstlisting}
@@ -123,9 +114,9 @@ jt = std::clamp(jt, -maxFrictionImpulse, maxFrictionImpulse);
 \end{lstlisting}
 
 \section{Task 3}
-单步仿真顺序如下：若开启重叠松弛，先在积分前按穿透深度把重叠体沿法向推开一小步；保存上一帧位姿供连续碰撞检测；对全体刚体做显式积分；若开启 CCD，在高速接近且尚未穿透时用插值二分把状态回拨到首次接触时刻；再对所有刚体对做 FCL 碰撞检测生成接触；解约束时若走 Schur 路径，则接触与关节的法向乘子在同一线性系统里一次解出，否则先顺序解接触再顺序解关节；随后做位置穿透修正与静置接触稳定；最后清空本步外力累加器。
+单步仿真顺序如下：若开启重叠松弛，先在积分前按穿透深度把重叠体沿法向推开一小步；保存上一帧位姿供连续碰撞检测；对全体刚体做显式积分；若开启 CCD，在高速接近且上一帧与当前帧均未报告穿透时，对位姿插值求首次接触时刻并回拨；再对所有刚体对做 FCL 碰撞检测（经接触合并）生成接触；解约束时若走 Schur 路径，则接触与关节乘子在同一线性系统里一次解出，否则先顺序解接触再顺序解关节；随后做位置穿透修正与静置接触稳定；最后清空本步外力累加器。
 
-重叠松弛按接触深度与两体逆质量比例分配位移，并对单步修正量设上限，减弱初始堆叠穿透带来的数值冲击。
+重叠松弛按接触深度与两体逆质量比例分配位移；位置修正对单次深度与 Baumgarte 相关项设有上限（如 \texttt{MaxDepthPerPositionPass}、\texttt{BiasPenetrationCap}），减轻深穿透与堆叠初始化的数值冲击。
 
 \begin{lstlisting}
 void RigidBodySystem::Step(float dt) {
@@ -152,13 +143,13 @@ if (!b.Fixed) b.X += b.InvMass * corr;
 \end{lstlisting}
 
 \section{Bonus B1}
-一排立方体高弹性、低摩擦；仿真开始后首块可自动获得一次侧向冲量，动量沿接触链传递。
+五个等尺寸立方体沿 $+x$ 排成接触链：静止四块中心在 $0,\,2h,\,4h,\,6h$（$h$ 为半长），首块（撞击块）中心在 $-2h-\texttt{strikerGap}$，与第一块静止体之间留约 $0.88\,\mathrm{m}$ 间隙，初速约 $(5,0,0)$，便于观察加速与碰撞传递过程。恢复系数约 $0.992$、摩擦为 $0$，并提高速度迭代次数、略降时间尺度与子步，减轻串行冲量下的能量损失与顺序误差。面--面类预设中可对平行法向接触做合并（见 Task 2），减轻虚假转动。仿真由用户通过 \textbf{Start} 启动，无自动侧向冲量。
 
 \section{Bonus B2}
 地面上的多层立方体：零恢复、高摩擦；依赖子步数与位置迭代抑制穿透与抖动。
 
 \section{Bonus B3}
-FCL 使用球、柱碰撞体；惯量按球、柱解析公式写入对角逆。渲染用 \texttt{BuildBodyMesh} 为球、柱生成三角网格。
+FCL 使用球、柱碰撞体；惯量按球、柱解析公式写入体对角逆（圆柱轴向与 $y$ 轴一致）。渲染用 \texttt{BuildBodyMesh} 为球、柱生成三角网格。圆柱网格高度沿 $\pm y$；碰撞侧通过绕 $x$ 轴 $-90^\circ$ 的固定旋转与 FCL 圆柱局部 $z$ 轴对齐。场景中含立方体、球、柱与地面对象，柱体可给初角速度演示滚动。
 
 \begin{lstlisting}
 MeshData BuildBodyMesh(RigidBody const & body) {
@@ -192,9 +183,12 @@ for (int i = 0; i < m; ++i) {
 \end{lstlisting}
 
 \section{Bonus B5}
-铰链在数据结构中保存两刚体上的局部锚点；由世界坐标锚点写入时，用当前姿态转到体坐标。顺序求解时构造 $3\times3$ 有效质量矩阵（含平动与转动耦合），右端为锚点相对速度叠加 Baumgarte 位置误差，LDLT 解出空间冲量并施加在两锚点。与 Schur 合解时，同一关节在世界系三个坐标轴上各对应一行，与接触行拼成同一矩阵。
+固定根立方体与五节细长连杆\textbf{端面对端面}沿 $x$ 排成一条直线（质心共线、$y,z$ 相同，相邻面间留小间隙）；每对相邻刚体之间仅施加\textbf{一个}点对点约束，世界锚点取\textbf{间隙中面}上截面中心 $(x_{\mathrm{mid}},\,y_c,\,z_c)$。双锚点顺序冲量会在两约束间交替抢误差导致振荡，故采用单点球铰配合几何对齐。关节速度级 Baumgarte 系数由成员 \texttt{JointBaumgarteBeta} 控制（本场景约 $0.055$），默认 $0.2$；并略增速度迭代次数。
+
+数据结构仍用局部锚点；顺序求解时构造 $3\times3$ 有效质量矩阵，$\texttt{rhs}=-(\mathbf{v}_{\mathrm{rel}}+\beta\,\mathbf{e}/\Delta t)$，LDLT 解冲量。Schur 路径下关节三轴与接触同行联立。
 
 \begin{lstlisting}
+float const beta = JointBaumgarteBeta;
 Eigen::Matrix3f K = (a.InvMass + b.InvMass) * Eigen::Matrix3f::Identity();
 K -= skew(ra) * invIA * skew(ra);
 K -= skew(rb) * invIB * skew(rb);
@@ -205,18 +199,12 @@ b.ApplyImpulse(pb, impulse);
 \end{lstlisting}
 
 \section{Bonus B6}
-当相对平移 $\|\mathbf{v}_i-\mathbf{v}_j\|\Delta t$ 超过尺度阈值、且上一帧与当前帧 FCL 均未报告穿透时，在插值参数 $t\in[0,1]$ 上对 $\mathbf{x}$ 线性插值、对 $\mathbf{q}$ \texttt{slerp}，二分求最早发生碰撞的 $t$，将两体位姿回退到接触前一刻。
+CCD 仅在两体均非固定、相对速度非零时考虑。跳过条件改为：$\|\mathbf{v}_i-\mathbf{v}_j\|\Delta t \le k\,\eta$，其中 $\eta$ 为两物体沿相对速度单位方向上的\textbf{投影特征尺度}（球为直径；盒为 OBB 三半轴在该方向投影的 $L_1$ 型宽度），$k\approx 0.22$，避免薄板沿弹道方向极薄时仍误判为可跳过而穿模。
 
-\begin{lstlisting}
-Eigen::Vector3f const xi = _prevStates[i].X + mid * (Bodies[i].X - _prevStates[i].X);
-Eigen::Vector3f const xj = _prevStates[j].X + mid * (Bodies[j].X - _prevStates[j].X);
-Eigen::Quaternionf const qi = _prevStates[i].Q.slerp(mid, Bodies[i].Q).normalized();
-Eigen::Quaternionf const qj = _prevStates[j].Q.slerp(mid, Bodies[j].Q).normalized();
-bool midCollide = collidePair(Bodies[i], Bodies[j], xi, qi, xj, qj, midResult, 1);
-\end{lstlisting}
+若上一帧与当前帧均未穿透，则在 $t\in[0,1]$ 上对位置线性插值、姿态 \texttt{slerp}，约 $22$ 次二分求最早碰撞；若仍未命中且位移足够大，再对 $t$ 做 $32$ 步均匀扫描作后备。碰撞查询使用 \texttt{maxContact=4}。回拨时刻取 $\texttt{hi}$ 减去与弧长相关的微小裕量。B6 场景中薄板与高速小球并设子步数为 $4$。
 
 \section{用户输入与冲量}
-左侧面板：下拉框切换场景；\textbf{Reset Preset} 重置当前场景；\textbf{Start/Stop Simulation} 启停仿真。\textbf{Selected Body} 选择受力刚体编号；\textbf{Impulse Strength} 调节冲量大小；六个滑条分别调节该体的线速度三分量与角速度三分量；六个 \textbf{Impulse $\pm$X/Y/Z} 按钮沿世界坐标轴对质心施加一次冲量；\textbf{Gravity} 调节重力加速度。
+左侧面板：下拉框切换场景；\textbf{Reset Preset} 重置当前场景（含 \texttt{JointBaumgarteBeta} 等求解器参数默认值）；\textbf{Start/Stop Simulation} 启停仿真。\textbf{Selected Body} 选择刚体；\textbf{Impulse Strength} 与线速度（Vx/Vy/Vz）、角速度（Wx/Wy/Wz）六滑条置于上方，便于调节运动状态；六个 \textbf{Impulse $\pm$X/Y/Z} 按钮沿世界轴对选中体质心施一次冲量；\textbf{Gravity} 调节重力。
 
 鼠标：在画面获得焦点且已选中非固定刚体时，按住拖动会通过相机位移换算成作用在该体质心上的冲量（力度与拖动幅度相关）。
 
