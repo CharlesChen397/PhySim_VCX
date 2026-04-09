@@ -303,6 +303,7 @@ namespace VCX::Labs::RigidBody {
         _system.VelocityIterations           = 12;
         _system.PositionIterations           = 3;
         _system.BaumgarteBeta                = 0.2f;
+        _system.JointBaumgarteBeta           = 0.2f;
         _system.MaxBiasVelocity              = 1.5f;
         _system.PenetrationSlop              = 1e-3f;
         _system.RestitutionVelocityThreshold = 0.6f;
@@ -401,12 +402,14 @@ namespace VCX::Labs::RigidBody {
         _system.EnableCCD             = false;
         _system.EnableSchurComplement = false;
 
-        int a               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(-1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        int b               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        int a = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(-1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        int b = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
         _system.Bodies[a].V = Eigen::Vector3f(1.4f, 0.f, 0.f);
         _system.Bodies[b].V = Eigen::Vector3f(-1.4f, 0.f, 0.f);
         _system.Bodies[a].W.setZero();
         _system.Bodies[b].W.setZero();
+        _system.Bodies[a].Friction = 0.f;
+        _system.Bodies[b].Friction = 0.f;
     }
 
     void CasePlayground::initComplexScene() {
@@ -485,15 +488,15 @@ namespace VCX::Labs::RigidBody {
         Eigen::Vector3f const boxDim(0.9f, 0.55f, 0.55f);
         float const           hx = 0.5f * boxDim.x();
 
-        int         ids[5];
-        float const gap0 = 0.06f;
-        ids[1]           = _system.AddBox(boxDim, Eigen::Vector3f(0.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+        int ids[5];
+        ids[1] = _system.AddBox(boxDim, Eigen::Vector3f(0.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
         ids[2]           = _system.AddBox(boxDim, Eigen::Vector3f(hx * 2.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
         ids[3]           = _system.AddBox(boxDim, Eigen::Vector3f(4.f * hx, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
         ids[4]           = _system.AddBox(boxDim, Eigen::Vector3f(6.f * hx, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
 
-        float const strikerX = -2.f * hx - gap0;
-        ids[0]               = _system.AddBox(boxDim, Eigen::Vector3f(strikerX, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
+        float const strikerGap = 0.88f;
+        float const strikerX   = -2.f * hx - strikerGap;
+        ids[0]                 = _system.AddBox(boxDim, Eigen::Vector3f(strikerX, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, false);
 
         for (int i = 0; i < 5; ++i) {
             auto & b      = _system.Bodies[ids[i]];
@@ -502,7 +505,7 @@ namespace VCX::Labs::RigidBody {
             b.W.setZero();
             b.V.setZero();
         }
-        _system.Bodies[ids[0]].V = Eigen::Vector3f(4.2f, 0.f, 0.f);
+        _system.Bodies[ids[0]].V = Eigen::Vector3f(5.0f, 0.f, 0.f);
 
         _selectedBody = ids[0];
     }
@@ -585,24 +588,33 @@ namespace VCX::Labs::RigidBody {
         _system.Gravity               = 9.8f;
         _system.EnableCCD             = true;
         _system.EnableSchurComplement = false;
-        _system.VelocityIterations    = 30;
+        _system.VelocityIterations    = 40;
+        _system.JointBaumgarteBeta    = 0.055f;
 
         _system.AddBox(Eigen::Vector3f(8.f, 0.4f, 8.f), Eigen::Vector3f(0.f, -3.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
 
-        int         root       = _system.AddBox(Eigen::Vector3f(0.5f, 0.5f, 0.5f), Eigen::Vector3f(0.f, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
-        int         prev       = root;
-        float       prevCenter = 0.f;
-        float       prevHalfX  = 0.25f;
-        float const gap        = 0.05f;
-        float const linkHalfX  = 0.45f;
+        float const           rootHalf = 0.25f;
+        float const           cy       = 2.2f;
+        float const           cz       = 0.f;
+        int const             root     = _system.AddBox(Eigen::Vector3f(2.f * rootHalf, 2.f * rootHalf, 2.f * rootHalf), Eigen::Vector3f(0.f, cy, cz), Eigen::Quaternionf::Identity(), 1.f, true);
+        int                   prev       = root;
+        float const           gap        = 0.05f;
+        Eigen::Vector3f const linkDim(0.9f, 0.35f, 0.35f);
+        Eigen::Vector3f const linkHalf(0.45f, 0.175f, 0.175f);
+        // 上一节 +x 端面位置（根块中心在原点）
+        float prevRightX = rootHalf;
+
         for (int i = 0; i < 5; ++i) {
-            float const     cx = prevCenter + prevHalfX + gap + linkHalfX;
-            int             id = _system.AddBox(Eigen::Vector3f(0.9f, 0.35f, 0.35f), Eigen::Vector3f(cx, 2.2f, 0.f), Eigen::Quaternionf::Identity(), 0.8f, false);
-            Eigen::Vector3f jointPos(prevCenter + prevHalfX + gap * 0.5f, 2.2f, 0.f);
-            _system.AddPointJoint(prev, id, jointPos);
+            // 端面对端面排成一条直线长条：质心共线 (cy,cz)，沿 x 每隔 2·半长 + 间隙
+            float const             cx   = prevRightX + gap + linkHalf.x();
+            Eigen::Vector3f const   newC(cx, cy, cz);
+            float const           xMid    = prevRightX + 0.5f * gap;
+            Eigen::Vector3f const jointAt(xMid, cy, cz);
+            // 仅用一处球铰：双点顺序冲量会在两锚间「抢误差」导致抖动；几何上仍端面对齐成长条，铰链取间隙中面中心
+            int const id = _system.AddBox(linkDim, newC, Eigen::Quaternionf::Identity(), 0.8f, false);
+            _system.AddPointJoint(prev, id, jointAt);
             prev       = id;
-            prevCenter = cx;
-            prevHalfX  = linkHalfX;
+            prevRightX = cx + linkHalf.x();
         }
     }
 
@@ -611,6 +623,7 @@ namespace VCX::Labs::RigidBody {
         _system.EnableCCD             = true;
         _system.EnableSchurComplement = false;
         _system.VelocityIterations    = 20;
+        _substeps                     = 4;
 
         _system.AddBox(Eigen::Vector3f(0.25f, 5.f, 6.f), Eigen::Vector3f(0.f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.f, true);
 

@@ -26,10 +26,20 @@ namespace VCX::Labs::RigidBody {
             return std::make_shared<fcl::Box<float>>(1.f, 1.f, 1.f);
         }
 
-        fcl::Transform3<float> createTransform(Eigen::Vector3f const & x, Eigen::Quaternionf const & q) {
+        /// FCL 圆柱局部对称轴为 +Z（见 fcl::Cylinder::lz）；惯量与 PrimitiveMesh 以局部 +Y 为轴。
+        /// 右乘此旋转将 FCL 局部坐标映射到物体体轴系，使碰撞与网格、惯量一致。
+        Eigen::Matrix3f cylinderFclToBodyRotation() {
+            return Eigen::AngleAxisf(-float(M_PI) / 2.f, Eigen::Vector3f::UnitX()).toRotationMatrix();
+        }
+
+        fcl::Transform3<float> createTransform(Eigen::Vector3f const & x, Eigen::Quaternionf const & q, ShapeType shape) {
             fcl::Transform3<float> tf = fcl::Transform3<float>::Identity();
-            tf.linear()               = q.normalized().toRotationMatrix();
-            tf.translation()          = x;
+            Eigen::Matrix3f        R  = q.normalized().toRotationMatrix();
+            if (shape == ShapeType::Cylinder) {
+                R = R * cylinderFclToBodyRotation();
+            }
+            tf.linear()      = R;
+            tf.translation() = x;
             return tf;
         }
 
@@ -44,8 +54,8 @@ namespace VCX::Labs::RigidBody {
             int                           maxContact = 4) {
             auto                         geomA = createGeometry(a);
             auto                         geomB = createGeometry(b);
-            fcl::CollisionObject<float>  objA(geomA, createTransform(xa, qa));
-            fcl::CollisionObject<float>  objB(geomB, createTransform(xb, qb));
+            fcl::CollisionObject<float>  objA(geomA, createTransform(xa, qa, a.Shape));
+            fcl::CollisionObject<float>  objB(geomB, createTransform(xb, qb, b.Shape));
             fcl::CollisionRequest<float> request(maxContact, true);
             result.clear();
             fcl::collide(&objA, &objB, request, result);
@@ -63,6 +73,67 @@ namespace VCX::Labs::RigidBody {
         float safeInv(float x) {
             constexpr float eps = 1e-8f;
             return std::abs(x) < eps ? 0.f : 1.f / x;
+        }
+
+        /// 将同一物体对上、法向几乎一致的多个 FCL 接触合并为一点，避免面–面时角点顺序冲量产生虚假角速度。
+        void appendContactsForPair(
+            std::vector<Contact> &           out,
+            int                              ia,
+            int                              ib,
+            RigidBody const &                bodyA,
+            RigidBody const &                bodyB,
+            std::vector<fcl::Contact<float>> const & fclContacts) {
+            std::vector<Contact> batch;
+            batch.reserve(fclContacts.size());
+            for (auto const & c : fclContacts) {
+                Eigen::Vector3f n = c.normal;
+                if (n.squaredNorm() < 1e-12f) {
+                    continue;
+                }
+                n.normalize();
+                Eigen::Vector3f const ab = bodyB.X - bodyA.X;
+                if (ab.dot(n) < 0.f) {
+                    n = -n;
+                }
+                Contact contact;
+                contact.A           = ia;
+                contact.B           = ib;
+                contact.Point       = c.pos;
+                contact.Normal      = n;
+                contact.Penetration = std::max(0.f, c.penetration_depth);
+                contact.Restitution = std::min(bodyA.Restitution, bodyB.Restitution);
+                batch.push_back(contact);
+            }
+            if (batch.empty()) {
+                return;
+            }
+            if (batch.size() == 1) {
+                out.push_back(batch[0]);
+                return;
+            }
+            Eigen::Vector3f const nRef = batch[0].Normal;
+            for (std::size_t k = 1; k < batch.size(); ++k) {
+                if (nRef.dot(batch[k].Normal) < 0.985f) {
+                    out.insert(out.end(), batch.begin(), batch.end());
+                    return;
+                }
+            }
+            Eigen::Vector3f nSum   = Eigen::Vector3f::Zero();
+            Eigen::Vector3f pSum   = Eigen::Vector3f::Zero();
+            float             penM = 0.f;
+            for (auto const & c : batch) {
+                nSum += c.Normal;
+                pSum += c.Point;
+                penM = std::max(penM, c.Penetration);
+            }
+            Contact merged;
+            merged.A           = ia;
+            merged.B           = ib;
+            merged.Normal      = nSum.normalized();
+            merged.Point       = pSum / static_cast<float>(batch.size());
+            merged.Penetration = penM;
+            merged.Restitution = batch[0].Restitution;
+            out.push_back(merged);
         }
     } // namespace
 
@@ -287,12 +358,21 @@ namespace VCX::Labs::RigidBody {
     }
 
     void RigidBodySystem::continuousCollisionPass(float dt) {
-        constexpr float speedThresholdScale = 0.5f;
+        // 用「沿相对速度方向的投影厚度」判断是否可跳过 CCD；薄板沿弹道方向很薄时，旧版 min(Dim) 与 0.5 系数仍可能让大步长跳过 CCD 而穿模。
+        constexpr float speedThresholdScale = 0.22f;
 
-        auto computeSize = [](RigidBody const & body) {
-            if (body.Shape == ShapeType::Sphere) return body.Radius * 2.f;
-            if (body.Shape == ShapeType::Cylinder) return std::min(body.Radius * 2.f, body.Height);
-            return body.Dim.minCoeff();
+        auto extentAlongDirection = [](RigidBody const & body, Eigen::Vector3f const & dirUnit) {
+            if (body.Shape == ShapeType::Sphere) {
+                return body.Radius * 2.f;
+            }
+            if (body.Shape == ShapeType::Cylinder) {
+                return std::min(body.Radius * 2.f, body.Height);
+            }
+            Eigen::Matrix3f const R  = body.Q.normalized().toRotationMatrix();
+            Eigen::Vector3f const ex = R.col(0) * (0.5f * body.Dim.x());
+            Eigen::Vector3f const ey = R.col(1) * (0.5f * body.Dim.y());
+            Eigen::Vector3f const ez = R.col(2) * (0.5f * body.Dim.z());
+            return 2.f * (std::abs(dirUnit.dot(ex)) + std::abs(dirUnit.dot(ey)) + std::abs(dirUnit.dot(ez)));
         };
 
         for (int i = 0; i < static_cast<int>(Bodies.size()); ++i) {
@@ -301,16 +381,21 @@ namespace VCX::Labs::RigidBody {
                     continue;
                 }
 
-                float const relSpeed = (Bodies[i].V - Bodies[j].V).norm();
-                float const minSize  = std::min(computeSize(Bodies[i]), computeSize(Bodies[j]));
-                if (relSpeed * dt <= speedThresholdScale * minSize) {
+                Eigen::Vector3f const relV     = Bodies[i].V - Bodies[j].V;
+                float const           relSpeed = relV.norm();
+                if (relSpeed <= 1e-8f) {
+                    continue;
+                }
+                Eigen::Vector3f const u        = relV / relSpeed;
+                float const           minExtent = std::min(extentAlongDirection(Bodies[i], u), extentAlongDirection(Bodies[j], u));
+                if (relSpeed * dt <= speedThresholdScale * minExtent) {
                     continue;
                 }
 
                 fcl::CollisionResult<float> prevResult;
                 fcl::CollisionResult<float> curResult;
-                bool const                  prevCollide = collidePair(Bodies[i], Bodies[j], _prevStates[i].X, _prevStates[i].Q, _prevStates[j].X, _prevStates[j].Q, prevResult, 1);
-                bool const                  curCollide  = collidePair(Bodies[i], Bodies[j], Bodies[i].X, Bodies[i].Q, Bodies[j].X, Bodies[j].Q, curResult, 1);
+                bool const                  prevCollide = collidePair(Bodies[i], Bodies[j], _prevStates[i].X, _prevStates[i].Q, _prevStates[j].X, _prevStates[j].Q, prevResult, 4);
+                bool const                  curCollide  = collidePair(Bodies[i], Bodies[j], Bodies[i].X, Bodies[i].Q, Bodies[j].X, Bodies[j].Q, curResult, 4);
                 if (prevCollide || curCollide) {
                     continue;
                 }
@@ -318,7 +403,7 @@ namespace VCX::Labs::RigidBody {
                 bool  found = false;
                 float lo    = 0.f;
                 float hi    = 1.f;
-                for (int k = 0; k < 7; ++k) {
+                for (int k = 0; k < 22; ++k) {
                     float const              mid = 0.5f * (lo + hi);
                     Eigen::Vector3f const    xi  = _prevStates[i].X + mid * (Bodies[i].X - _prevStates[i].X);
                     Eigen::Vector3f const    xj  = _prevStates[j].X + mid * (Bodies[j].X - _prevStates[j].X);
@@ -326,7 +411,7 @@ namespace VCX::Labs::RigidBody {
                     Eigen::Quaternionf const qj  = _prevStates[j].Q.slerp(mid, Bodies[j].Q).normalized();
 
                     fcl::CollisionResult<float> midResult;
-                    bool const                  midCollide = collidePair(Bodies[i], Bodies[j], xi, qi, xj, qj, midResult, 1);
+                    bool const                  midCollide = collidePair(Bodies[i], Bodies[j], xi, qi, xj, qj, midResult, 4);
                     if (midCollide) {
                         found = true;
                         hi    = mid;
@@ -335,12 +420,33 @@ namespace VCX::Labs::RigidBody {
                     }
                 }
 
+                if (! found) {
+                    float const disp = (Bodies[i].X - _prevStates[i].X).norm() + (Bodies[j].X - _prevStates[j].X).norm();
+                    if (disp > 0.15f * minExtent) {
+                        for (int s = 1; s <= 32; ++s) {
+                            float const              t   = static_cast<float>(s) / 33.f;
+                            Eigen::Vector3f const    xi  = _prevStates[i].X + t * (Bodies[i].X - _prevStates[i].X);
+                            Eigen::Vector3f const    xj  = _prevStates[j].X + t * (Bodies[j].X - _prevStates[j].X);
+                            Eigen::Quaternionf const qi  = _prevStates[i].Q.slerp(t, Bodies[i].Q).normalized();
+                            Eigen::Quaternionf const qj  = _prevStates[j].Q.slerp(t, Bodies[j].Q).normalized();
+                            fcl::CollisionResult<float> midResult;
+                            if (collidePair(Bodies[i], Bodies[j], xi, qi, xj, qj, midResult, 4)) {
+                                found = true;
+                                hi    = t;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if (found) {
-                    float const toi = std::max(0.f, hi - 1e-3f);
-                    Bodies[i].X     = _prevStates[i].X + toi * (Bodies[i].X - _prevStates[i].X);
-                    Bodies[j].X     = _prevStates[j].X + toi * (Bodies[j].X - _prevStates[j].X);
-                    Bodies[i].Q     = _prevStates[i].Q.slerp(toi, Bodies[i].Q).normalized();
-                    Bodies[j].Q     = _prevStates[j].Q.slerp(toi, Bodies[j].Q).normalized();
+                    float const arcLen = (Bodies[i].X - _prevStates[i].X).norm() + (Bodies[j].X - _prevStates[j].X).norm();
+                    float const margin = std::max(1e-4f, std::min(2e-3f, 2e-4f * std::max(1.f, arcLen)));
+                    float const toi    = std::max(0.f, hi - margin);
+                    Bodies[i].X        = _prevStates[i].X + toi * (Bodies[i].X - _prevStates[i].X);
+                    Bodies[j].X        = _prevStates[j].X + toi * (Bodies[j].X - _prevStates[j].X);
+                    Bodies[i].Q        = _prevStates[i].Q.slerp(toi, Bodies[i].Q).normalized();
+                    Bodies[j].Q        = _prevStates[j].Q.slerp(toi, Bodies[j].Q).normalized();
                 }
             }
         }
@@ -362,30 +468,7 @@ namespace VCX::Labs::RigidBody {
 
                 std::vector<fcl::Contact<float>> fclContacts;
                 result.getContacts(fclContacts);
-                for (auto const & c : fclContacts) {
-                    Eigen::Vector3f n = c.normal;
-                    if (n.squaredNorm() < 1e-12f) {
-                        continue;
-                    }
-                    n.normalize();
-
-                    // FCL normal direction can vary across versions/algorithms.
-                    // Force a consistent convention: normal points from body A to body B.
-                    Eigen::Vector3f const ab = Bodies[j].X - Bodies[i].X;
-                    if (ab.dot(n) < 0.f) {
-                        n = -n;
-                    }
-
-                    Contact contact;
-                    contact.A           = i;
-                    contact.B           = j;
-                    contact.Point       = c.pos;
-                    contact.Normal      = n;
-                    contact.Penetration = std::max(0.f, c.penetration_depth);
-                    // Use pair restitution that does not inflate bounce when one side is inelastic.
-                    contact.Restitution = std::min(Bodies[i].Restitution, Bodies[j].Restitution);
-                    Contacts.push_back(contact);
-                }
+                appendContactsForPair(Contacts, i, j, Bodies[i], Bodies[j], fclContacts);
             }
         }
     }
@@ -618,7 +701,7 @@ namespace VCX::Labs::RigidBody {
             return;
         }
 
-        float const beta = 0.2f;
+        float const beta = JointBaumgarteBeta;
 
         for (int iter = 0; iter < VelocityIterations; ++iter) {
             for (auto const & joint : Joints) {

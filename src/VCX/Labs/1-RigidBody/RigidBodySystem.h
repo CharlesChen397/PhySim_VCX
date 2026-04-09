@@ -73,6 +73,8 @@ namespace VCX::Labs::RigidBody {
         int   VelocityIterations { 12 };
         int   PositionIterations { 3 };
         float BaumgarteBeta { 0.2f };
+        /// 点对点关节位置误差进速度目标的系数（过大时顺序求解易振荡）
+        float JointBaumgarteBeta { 0.2f };
         float MaxBiasVelocity { 1.5f };
         float PenetrationSlop { 1e-3f };
         /// 参与 Baumgarte 法向偏置的最大穿透深度，防止初始深穿透时冲量爆炸
