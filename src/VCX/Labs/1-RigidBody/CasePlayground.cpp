@@ -401,10 +401,12 @@ namespace VCX::Labs::RigidBody {
         _system.EnableCCD             = false;
         _system.EnableSchurComplement = false;
 
-        int a               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(-1.8f, 0.3f, 0.4f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        int b               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(1.8f, 0.3f, -0.4f), Eigen::Quaternionf::Identity(), 1.0f, false);
-        _system.Bodies[a].V = Eigen::Vector3f(1.4f, 0.f, -0.1f);
-        _system.Bodies[b].V = Eigen::Vector3f(-1.4f, 0.f, 0.1f);
+        int a               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(-1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        int b               = _system.AddBox(Eigen::Vector3f(1.2f, 1.2f, 1.2f), Eigen::Vector3f(1.8f, 0.f, 0.f), Eigen::Quaternionf::Identity(), 1.0f, false);
+        _system.Bodies[a].V = Eigen::Vector3f(1.4f, 0.f, 0.f);
+        _system.Bodies[b].V = Eigen::Vector3f(-1.4f, 0.f, 0.f);
+        _system.Bodies[a].W.setZero();
+        _system.Bodies[b].W.setZero();
     }
 
     void CasePlayground::initComplexScene() {
