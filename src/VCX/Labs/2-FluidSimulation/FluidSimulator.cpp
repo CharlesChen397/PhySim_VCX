@@ -430,34 +430,39 @@ namespace VCX::Labs::Fluid {
         // 清空压力
         std::fill(m_p.begin(), m_p.end(), 0.0f);
 
+        int n = m_iCellY * m_iCellZ;
+        int m = m_iCellZ;
+
         // Gauss-Seidel迭代
         for (int iter = 0; iter < numIters; iter++) {
             for (int i = 1; i < m_iCellX - 1; i++) {
                 for (int j = 1; j < m_iCellY - 1; j++) {
                     for (int k = 1; k < m_iCellZ - 1; k++) {
-                        int idx = index2GridOffset(glm::ivec3(i, j, k));
+                        int idx = i * n + j * m + k;
 
                         if (m_type[idx] != 1) continue; // 只处理流体cell
 
-                        // 计算散度
-                        int idx_xp = index2GridOffset(glm::ivec3(i + 1, j, k));
-                        int idx_xm = index2GridOffset(glm::ivec3(i - 1, j, k));
-                        int idx_yp = index2GridOffset(glm::ivec3(i, j + 1, k));
-                        int idx_ym = index2GridOffset(glm::ivec3(i, j - 1, k));
-                        int idx_zp = index2GridOffset(glm::ivec3(i, j, k + 1));
-                        int idx_zm = index2GridOffset(glm::ivec3(i, j, k - 1));
+                        // 获取邻居cell的索引
+                        int idx_xp = (i + 1) * n + j * m + k;
+                        int idx_xm = (i - 1) * n + j * m + k;
+                        int idx_yp = i * n + (j + 1) * m + k;
+                        int idx_ym = i * n + (j - 1) * m + k;
+                        int idx_zp = i * n + j * m + (k + 1);
+                        int idx_zm = i * n + j * m + (k - 1);
 
+                        // 计算固体边界
                         float sx0 = m_s[idx_xm];
-                        float sx1 = m_s[idx];
+                        float sx1 = m_s[idx_xp];
                         float sy0 = m_s[idx_ym];
-                        float sy1 = m_s[idx];
+                        float sy1 = m_s[idx_yp];
                         float sz0 = m_s[idx_zm];
-                        float sz1 = m_s[idx];
+                        float sz1 = m_s[idx_zp];
 
                         float s = sx0 + sx1 + sy0 + sy1 + sz0 + sz1;
                         if (s == 0.0f) continue;
 
-                        // 计算散度
+                        // 计算散度 (divergence)
+                        // 对于交错网格：div = (u_right - u_left) + (v_top - v_bottom) + (w_front - w_back)
                         float div = m_vel[idx_xp].x - m_vel[idx].x +
                                    m_vel[idx_yp].y - m_vel[idx].y +
                                    m_vel[idx_zp].z - m_vel[idx].z;
@@ -470,11 +475,13 @@ namespace VCX::Labs::Fluid {
                             }
                         }
 
-                        // 压力修正
-                        float p = -div / s * overRelaxation;
+                        // 压力修正 (使用over-relaxation)
+                        float p = -div / s;
+                        p *= overRelaxation;
                         m_p[idx] += p;
 
-                        // 更新速度
+                        // 更新速度场
+                        // 对于交错网格，u[i,j,k]是cell(i,j,k)的左边界速度
                         m_vel[idx].x -= sx0 * p;
                         m_vel[idx_xp].x += sx1 * p;
                         m_vel[idx].y -= sy0 * p;
