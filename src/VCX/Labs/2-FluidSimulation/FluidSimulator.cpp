@@ -3,8 +3,17 @@
 namespace VCX::Labs::Fluid {
 
     void Simulator::integrateParticles(float timeStep) {
+        const float maxVelocity = 10.0f; // 限制最大速度
+
         for (int i = 0; i < m_iNumSpheres; i++) {
             m_particleVel[i] += gravity * timeStep;
+
+            // 限制速度大小防止爆炸
+            float speed = glm::length(m_particleVel[i]);
+            if (speed > maxVelocity) {
+                m_particleVel[i] *= maxVelocity / speed;
+            }
+
             m_particlePos[i] += m_particleVel[i] * timeStep;
         }
     }
@@ -223,43 +232,52 @@ namespace VCX::Labs::Fluid {
     }
 
     void Simulator::solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift) {
-        // 保存旧速度
+        // 保存旧速度用于FLIP
         m_pre_vel = m_vel;
 
         for (int iter = 0; iter < numIters; iter++) {
-            for (int i = 0; i < m_iCellX; i++) {
-                for (int j = 0; j < m_iCellY; j++) {
-                    for (int k = 0; k < m_iCellZ; k++) {
-                        if (m_type[index2GridOffset(glm::ivec3(i, j, k))] == 1) { // FLUID_CELL
-                            // 计算散度
-                            float d = overRelaxation * (
-                                m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x - m_vel[index2GridOffset(glm::ivec3(i, j, k))].x +
-                                m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y - m_vel[index2GridOffset(glm::ivec3(i, j, k))].y +
-                                m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z - m_vel[index2GridOffset(glm::ivec3(i, j, k))].z
-                            );
+            for (int i = 1; i < m_iCellX - 1; i++) {
+                for (int j = 1; j < m_iCellY - 1; j++) {
+                    for (int k = 1; k < m_iCellZ - 1; k++) {
+                        int idx = index2GridOffset(glm::ivec3(i, j, k));
 
-                            // 漂移补偿
-                            if (compensateDrift && m_particleRestDensity > 0.0f) {
-                                float k_drift = 0.99f;
-                                d -= k_drift * (m_particleDensity[index2GridOffset(glm::ivec3(i, j, k))] - m_particleRestDensity);
+                        if (m_type[idx] != 1) continue; // 只处理流体cell
+
+                        // 计算散度
+                        float div =
+                            m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x - m_vel[idx].x +
+                            m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y - m_vel[idx].y +
+                            m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z - m_vel[idx].z;
+
+                        // 漂移补偿 - 使用更小的系数
+                        if (compensateDrift && m_particleRestDensity > 0.0f) {
+                            float compression = m_particleDensity[idx] - m_particleRestDensity;
+                            if (compression > 0.0f) {
+                                div -= 0.5f * compression; // 降低补偿强度
                             }
-
-                            // 计算s
-                            float s =
-                                m_s[index2GridOffset(glm::ivec3(i + 1, j, k))] + m_s[index2GridOffset(glm::ivec3(i - 1, j, k))] +
-                                m_s[index2GridOffset(glm::ivec3(i, j + 1, k))] + m_s[index2GridOffset(glm::ivec3(i, j - 1, k))] +
-                                m_s[index2GridOffset(glm::ivec3(i, j, k + 1))] + m_s[index2GridOffset(glm::ivec3(i, j, k - 1))];
-
-                            if (s == 0.0f) continue;
-
-                            // 更新速度 - 注意这里是加d而不是减d！
-                            m_vel[index2GridOffset(glm::ivec3(i, j, k))].x += (d * m_s[index2GridOffset(glm::ivec3(i - 1, j, k))]) / s;
-                            m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x -= (d * m_s[index2GridOffset(glm::ivec3(i + 1, j, k))]) / s;
-                            m_vel[index2GridOffset(glm::ivec3(i, j, k))].y += (d * m_s[index2GridOffset(glm::ivec3(i, j - 1, k))]) / s;
-                            m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y -= (d * m_s[index2GridOffset(glm::ivec3(i, j + 1, k))]) / s;
-                            m_vel[index2GridOffset(glm::ivec3(i, j, k))].z += (d * m_s[index2GridOffset(glm::ivec3(i, j, k - 1))]) / s;
-                            m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z -= (d * m_s[index2GridOffset(glm::ivec3(i, j, k + 1))]) / s;
                         }
+
+                        // 计算邻居的固体标记
+                        float s =
+                            m_s[index2GridOffset(glm::ivec3(i - 1, j, k))] +
+                            m_s[index2GridOffset(glm::ivec3(i + 1, j, k))] +
+                            m_s[index2GridOffset(glm::ivec3(i, j - 1, k))] +
+                            m_s[index2GridOffset(glm::ivec3(i, j + 1, k))] +
+                            m_s[index2GridOffset(glm::ivec3(i, j, k - 1))] +
+                            m_s[index2GridOffset(glm::ivec3(i, j, k + 1))];
+
+                        if (s < 0.01f) continue;
+
+                        // 压力修正
+                        float p = -div / s * overRelaxation;
+
+                        // 更新速度
+                        m_vel[idx].x -= p * m_s[index2GridOffset(glm::ivec3(i - 1, j, k))];
+                        m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x += p * m_s[index2GridOffset(glm::ivec3(i + 1, j, k))];
+                        m_vel[idx].y -= p * m_s[index2GridOffset(glm::ivec3(i, j - 1, k))];
+                        m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y += p * m_s[index2GridOffset(glm::ivec3(i, j + 1, k))];
+                        m_vel[idx].z -= p * m_s[index2GridOffset(glm::ivec3(i, j, k - 1))];
+                        m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z += p * m_s[index2GridOffset(glm::ivec3(i, j, k + 1))];
                     }
                 }
             }
