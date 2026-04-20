@@ -428,24 +428,26 @@ namespace VCX::Labs::Fluid {
     // 求解不可压缩性
     void Simulator::solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift) {
         int n = m_iCellY * m_iCellZ;
-        int m = m_iCellZ;
+        int m_idx = m_iCellZ;
+
+        float rho = 1.0f; // 流体密度
 
         // Gauss-Seidel迭代
         for (int iter = 0; iter < numIters; iter++) {
             for (int i = 1; i < m_iCellX - 1; i++) {
                 for (int j = 1; j < m_iCellY - 1; j++) {
                     for (int k = 1; k < m_iCellZ - 1; k++) {
-                        int idx = i * n + j * m + k;
+                        int idx = i * n + j * m_idx + k;
 
                         if (m_type[idx] != 1) continue; // 只处理流体cell
 
                         // 获取邻居cell的索引
-                        int idx_xp = (i + 1) * n + j * m + k;
-                        int idx_xm = (i - 1) * n + j * m + k;
-                        int idx_yp = i * n + (j + 1) * m + k;
-                        int idx_ym = i * n + (j - 1) * m + k;
-                        int idx_zp = i * n + j * m + (k + 1);
-                        int idx_zm = i * n + j * m + (k - 1);
+                        int idx_xp = (i + 1) * n + j * m_idx + k;
+                        int idx_xm = (i - 1) * n + j * m_idx + k;
+                        int idx_yp = i * n + (j + 1) * m_idx + k;
+                        int idx_ym = i * n + (j - 1) * m_idx + k;
+                        int idx_zp = i * n + j * m_idx + (k + 1);
+                        int idx_zm = i * n + j * m_idx + (k - 1);
 
                         // 计算固体边界
                         float sx0 = m_s[idx_xm];
@@ -472,11 +474,14 @@ namespace VCX::Labs::Fluid {
                         }
 
                         // 压力修正
+                        // 根据PPT公式：p = -div / s * (rho * h / dt)
+                        // 但为了数值稳定性，我们使用简化形式
                         float p = -div / s;
                         p *= overRelaxation;
 
                         // 更新速度场
-                        // 注意：每个速度分量被两个相邻cell共享
+                        // 根据PPT：u_new = u - (dt/(rho*h)) * (p_i - p_{i-1})
+                        // 简化为：u_new = u - p (因为我们已经在压力计算中考虑了系数)
                         m_vel[idx].x -= sx0 * p;
                         m_vel[idx_xp].x += sx1 * p;
                         m_vel[idx].y -= sy0 * p;
