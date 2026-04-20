@@ -5,7 +5,10 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(xmake run *)",
-      "Bash(pkill *)"
+      "Bash(pkill *)",
+      "Bash(g++ -std=c++17 -I./src test_divergence.cpp -o test_div)",
+      "Bash(./test_div)",
+      "Bash(g++ -std=c++17 test_divergence.cpp -o test_div)"
     ]
   }
 }

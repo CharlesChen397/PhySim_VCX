@@ -58,9 +58,9 @@ namespace VCX::Labs::Fluid {
         void SimulateTimestep(float const dt) {
             int   numSubSteps       = 1;
             int   numParticleIters  = 5;
-            int   numPressureIters  = 30;
+            int   numPressureIters  = 50;  // 增加迭代次数以确保收敛
             bool  separateParticles = true;
-            float overRelaxation    = 1.9f;  // 修正：应该在1-2之间
+            float overRelaxation    = 1.0f;  // 先不使用over-relaxation
             bool  compensateDrift   = true;
 
             float     flipRatio = m_fRatio;
