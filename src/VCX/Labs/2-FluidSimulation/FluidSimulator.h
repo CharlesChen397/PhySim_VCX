@@ -60,7 +60,7 @@ namespace VCX::Labs::Fluid {
             int   numParticleIters  = 5;
             int   numPressureIters  = 30;
             bool  separateParticles = true;
-            float overRelaxation    = 0.5;
+            float overRelaxation    = 1.9f;  // 修正：应该在1-2之间
             bool  compensateDrift   = true;
 
             float     flipRatio = m_fRatio;
