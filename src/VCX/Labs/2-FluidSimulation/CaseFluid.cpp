@@ -96,7 +96,7 @@ namespace VCX::Labs::Fluid {
         _BoundaryItem.Draw({ _lineprogram.Use() });
         glLineWidth(1.f);
 
-        Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos, _simulation.m_particleColor);
+        Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos);
         auto const & material = _sceneObject.Materials[0];
         m.Mesh.Draw({ material.Albedo.Use(), material.MetaSpec.Use(), material.Height.Use(), _program.Use() },
             _sphere.Mesh.Indices.size(), 0, _simulation.m_iNumSpheres);
@@ -120,6 +120,6 @@ namespace VCX::Labs::Fluid {
     void CaseFluid::ResetSystem() {
         _simulation.setupScene(_res);
         _sphere = Engine::Model { Engine::Sphere(6, _simulation.m_particleRadius), 0 };
-        _stopped = false;
+        _stopped = true; // 初始静止
     }
 }

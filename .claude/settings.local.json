@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xmake build *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(xmake run *)",
+      "Bash(pkill *)"
+    ]
+  }
+}
