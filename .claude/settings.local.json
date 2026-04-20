@@ -8,7 +8,9 @@
       "Bash(pkill *)",
       "Bash(g++ -std=c++17 -I./src test_divergence.cpp -o test_div)",
       "Bash(./test_div)",
-      "Bash(g++ -std=c++17 test_divergence.cpp -o test_div)"
+      "Bash(g++ -std=c++17 test_divergence.cpp -o test_div)",
+      "Bash(git reset *)",
+      "Bash(xmake -P . build lab2)"
     ]
   }
 }
