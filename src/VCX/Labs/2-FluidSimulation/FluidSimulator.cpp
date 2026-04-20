@@ -12,12 +12,13 @@ namespace VCX::Labs::Fluid {
 
     // 处理粒子与边界的碰撞
     void Simulator::handleParticleCollisions(glm::vec3 obstaclePos, float obstacleRadius, glm::vec3 obstacleVel) {
-        float minX = m_h + m_particleRadius;
-        float maxX = (m_iCellX - 2) * m_h - m_particleRadius;
-        float minY = m_h + m_particleRadius;
-        float maxY = (m_iCellY - 2) * m_h - m_particleRadius;
-        float minZ = m_h + m_particleRadius;
-        float maxZ = (m_iCellZ - 2) * m_h - m_particleRadius;
+        // 坐标系是 [-0.5, 0.5]，需要加上偏移
+        float minX = -0.5f + m_h + m_particleRadius;
+        float maxX = -0.5f + (m_iCellX - 2) * m_h - m_particleRadius;
+        float minY = -0.5f + m_h + m_particleRadius;
+        float maxY = -0.5f + (m_iCellY - 2) * m_h - m_particleRadius;
+        float minZ = -0.5f + m_h + m_particleRadius;
+        float maxZ = -0.5f + (m_iCellZ - 2) * m_h - m_particleRadius;
 
         for (int i = 0; i < m_iNumSpheres; i++) {
             glm::vec3& pos = m_particlePos[i];
@@ -182,8 +183,11 @@ namespace VCX::Labs::Fluid {
         for (int p = 0; p < m_iNumSpheres; p++) {
             glm::vec3 pos = m_particlePos[p];
 
+            // 将粒子坐标从 [-0.5, 0.5] 转换到 [0, 1]
+            glm::vec3 pos0 = pos + glm::vec3(0.5f);
+
             // cell中心偏移半格
-            glm::vec3 gridPos = (pos - glm::vec3(m_h * 0.5f)) * m_fInvSpacing;
+            glm::vec3 gridPos = (pos0 - glm::vec3(m_h * 0.5f)) * m_fInvSpacing;
 
             int x0 = (int)std::floor(gridPos.x);
             int y0 = (int)std::floor(gridPos.y);
@@ -260,6 +264,9 @@ namespace VCX::Labs::Fluid {
 
                 // 对于每个速度分量（u, v, w），使用交错网格
                 for (int comp = 0; comp < 3; comp++) {
+                    // 将粒子坐标从 [-0.5, 0.5] 转换到 [0, 1]
+                    glm::vec3 pos0 = pos + glm::vec3(0.5f);
+
                     // 计算粒子在该速度分量网格上的位置
                     glm::vec3 offset(0.0f);
                     if (comp == 0) offset.x = 0.0f;      // u在x面上
@@ -271,7 +278,7 @@ namespace VCX::Labs::Fluid {
                     if (comp != 1) offset.y = m_h * 0.5f;
                     if (comp != 2) offset.z = m_h * 0.5f;
 
-                    glm::vec3 gridPos = (pos - offset) * m_fInvSpacing;
+                    glm::vec3 gridPos = (pos0 - offset) * m_fInvSpacing;
 
                     // 找到左下角网格索引
                     int x0 = (int)std::floor(gridPos.x);
@@ -337,6 +344,9 @@ namespace VCX::Labs::Fluid {
                 glm::vec3 flipVel = m_particleVel[p];
 
                 for (int comp = 0; comp < 3; comp++) {
+                    // 将粒子坐标从 [-0.5, 0.5] 转换到 [0, 1]
+                    glm::vec3 pos0 = pos + glm::vec3(0.5f);
+
                     // 计算粒子在该速度分量网格上的位置
                     glm::vec3 offset(0.0f);
                     if (comp == 0) offset.x = 0.0f;
@@ -347,7 +357,7 @@ namespace VCX::Labs::Fluid {
                     if (comp != 1) offset.y = m_h * 0.5f;
                     if (comp != 2) offset.z = m_h * 0.5f;
 
-                    glm::vec3 gridPos = (pos - offset) * m_fInvSpacing;
+                    glm::vec3 gridPos = (pos0 - offset) * m_fInvSpacing;
 
                     int x0 = (int)std::floor(gridPos.x);
                     int y0 = (int)std::floor(gridPos.y);
