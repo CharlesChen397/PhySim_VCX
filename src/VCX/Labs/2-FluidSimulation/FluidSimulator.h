@@ -57,14 +57,14 @@ namespace VCX::Labs::Fluid {
 
         void SimulateTimestep(float const dt) {
             int   numSubSteps       = 1;
-            int   numParticleIters  = 5;
-            int   numPressureIters  = 100;  // 增加迭代次数
+            int   numParticleIters  = 2;   // 降低到2以提高性能
+            int   numPressureIters  = 30;  // 降低到30以提高性能
             bool  separateParticles = true;
-            float overRelaxation    = 1.9f;  // 使用PPT推荐的1.9
+            float overRelaxation    = 1.9f;
             bool  compensateDrift   = true;
 
             float     flipRatio = m_fRatio;
-            glm::vec3 obstaclePos(0.0f); // obstacle can be moved with mouse, as a user interaction
+            glm::vec3 obstaclePos(0.0f);
             glm::vec3 obstacleVel(0.0f);
 
             float sdt = dt / numSubSteps;
