@@ -427,9 +427,6 @@ namespace VCX::Labs::Fluid {
 
     // 求解不可压缩性
     void Simulator::solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift) {
-        // 清空压力
-        std::fill(m_p.begin(), m_p.end(), 0.0f);
-
         int n = m_iCellY * m_iCellZ;
         int m = m_iCellZ;
 
@@ -461,8 +458,7 @@ namespace VCX::Labs::Fluid {
                         float s = sx0 + sx1 + sy0 + sy1 + sz0 + sz1;
                         if (s == 0.0f) continue;
 
-                        // 计算散度 (divergence)
-                        // 对于交错网格：div = (u_right - u_left) + (v_top - v_bottom) + (w_front - w_back)
+                        // 计算散度
                         float div = m_vel[idx_xp].x - m_vel[idx].x +
                                    m_vel[idx_yp].y - m_vel[idx].y +
                                    m_vel[idx_zp].z - m_vel[idx].z;
@@ -475,13 +471,12 @@ namespace VCX::Labs::Fluid {
                             }
                         }
 
-                        // 压力修正 (使用over-relaxation)
+                        // 压力修正
                         float p = -div / s;
                         p *= overRelaxation;
-                        m_p[idx] += p;
 
                         // 更新速度场
-                        // 对于交错网格，u[i,j,k]是cell(i,j,k)的左边界速度
+                        // 注意：每个速度分量被两个相邻cell共享
                         m_vel[idx].x -= sx0 * p;
                         m_vel[idx_xp].x += sx1 * p;
                         m_vel[idx].y -= sy0 * p;
