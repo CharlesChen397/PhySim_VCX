@@ -40,17 +40,22 @@ namespace VCX::Labs::Fluid {
         bool                                _stopped { false };
         Engine::Model                       _sphere;
         Engine::Model                       _obstacleSphere;
+        Engine::Model                       _obstacleBox;
         int                                 _res { 24 };
         float                               _timeStep { 0.016f };
         float                               _flipRatio { 0.95f };
+        ObstacleShape                       _obstacleShape { ObstacleShape::Sphere };
         glm::vec3                           _obstaclePos { 0.18f, -0.1f, 0.0f };
         glm::vec3                           _obstacleVel { 0.0f };
         float                               _obstacleRadius { 0.09f };
         bool                                _draggingObstacle { false };
+        bool                                _obstacleDraggedThisFrame { false };
+        std::pair<std::uint32_t, std::uint32_t> _canvasSize { 1, 1 };
 
         Simulator _simulation;
 
         void ResetSystem();
         void SyncObstacle(float dt);
+        bool IsMouseOnObstacle(ImVec2 const & pos) const;
     };
 } // namespace VCX::Labs::Fluid
