@@ -12,6 +12,11 @@
 
 
 namespace VCX::Labs::Fluid {
+    enum class ObstacleShape {
+        Sphere = 0,
+        Box = 1,
+    };
+
     struct Simulator {
         std::vector<glm::vec3> m_particlePos; // Particle m_particlePos
         std::vector<glm::vec3> m_particleVel; // Particle Velocity
@@ -45,6 +50,7 @@ namespace VCX::Labs::Fluid {
         float              m_particleRestDensity;
 
         glm::vec3 gravity { 0, -9.81f, 0 };
+        ObstacleShape m_obstacleShape { ObstacleShape::Sphere };
         glm::vec3 m_obstaclePos { 0.18f, -0.1f, 0.0f };
         glm::vec3 m_obstacleVel { 0.0f };
         float     m_obstacleRadius { 0.09f };
@@ -58,7 +64,7 @@ namespace VCX::Labs::Fluid {
         void        transferVelocities(bool toGrid, float flipRatio);
         void        solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift);
         void        updateParticleColors();
-        void        setObstacle(glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled);
+        void        setObstacle(ObstacleShape shape, glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled);
         inline bool isValidVelocity(int i, int j, int k, int dir) const {
             if (i < 0 || j < 0 || k < 0 || i >= m_iCellX || j >= m_iCellY || k >= m_iCellZ) {
                 return false;
@@ -103,6 +109,7 @@ namespace VCX::Labs::Fluid {
             bool  compensateDrift   = true;
 
             float     flipRatio = m_fRatio;
+            ObstacleShape obstacleShape = m_obstacleShape;
             glm::vec3 obstaclePos = m_obstaclePos;
             glm::vec3 obstacleVel = m_obstacleVel;
             float     obstacleRadius = m_enableObstacle ? m_obstacleRadius : 0.0f;
@@ -205,7 +212,7 @@ namespace VCX::Labs::Fluid {
                 }
             }
 
-            setObstacle(m_obstaclePos, glm::vec3(0.0f), m_obstacleRadius, m_enableObstacle);
+            setObstacle(m_obstacleShape, m_obstaclePos, glm::vec3(0.0f), m_obstacleRadius, m_enableObstacle);
         }
     };
 } // namespace VCX::Labs::Fluid

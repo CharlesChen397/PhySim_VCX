@@ -19,6 +19,24 @@ namespace VCX::Labs::Fluid {
         float component(glm::vec3 const & value, int dir) {
             return dir == 0 ? value.x : (dir == 1 ? value.y : value.z);
         }
+
+        glm::vec3 obstacleHalfExtent(Simulator const & sim, float padding = 0.0f) {
+            if (sim.m_obstacleShape == ObstacleShape::Sphere) {
+                return glm::vec3(sim.m_obstacleRadius + padding);
+            }
+            return glm::vec3(sim.m_obstacleRadius + padding);
+        }
+
+        bool containsObstacle(Simulator const & sim, glm::vec3 const & point, float padding = 0.0f) {
+            glm::vec3 const delta = point - sim.m_obstaclePos;
+            if (sim.m_obstacleShape == ObstacleShape::Sphere) {
+                float const radius = sim.m_obstacleRadius + padding;
+                return glm::dot(delta, delta) <= radius * radius;
+            }
+
+            glm::vec3 const halfExtent = obstacleHalfExtent(sim, padding);
+            return std::abs(delta.x) <= halfExtent.x && std::abs(delta.y) <= halfExtent.y && std::abs(delta.z) <= halfExtent.z;
+        }
     } // namespace
 
     namespace {
@@ -128,7 +146,7 @@ namespace VCX::Labs::Fluid {
                         bool obstacleSolid = false;
                         if (sim.m_enableObstacle) {
                             glm::vec3 const center = cellCenter(sim, index);
-                            obstacleSolid = glm::length(center - sim.m_obstaclePos) < sim.m_obstacleRadius + 0.5f * sim.m_h;
+                            obstacleSolid = containsObstacle(sim, center, 0.5f * sim.m_h);
                         }
 
                         sim.m_s[sim.index2GridOffset(index)] = (boundary || obstacleSolid) ? 0.0f : 1.0f;
@@ -142,7 +160,7 @@ namespace VCX::Labs::Fluid {
                 return false;
             }
             glm::vec3 const center = faceCenter(sim, faceIndex, dir);
-            return glm::length(center - sim.m_obstaclePos) <= sim.m_obstacleRadius + 0.35f * sim.m_h;
+            return containsObstacle(sim, center, 0.35f * sim.m_h);
         }
 
         void applyBoundaryVelocities(Simulator & sim) {
@@ -207,7 +225,8 @@ namespace VCX::Labs::Fluid {
         }
     } // namespace
 
-    void Simulator::setObstacle(glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled) {
+    void Simulator::setObstacle(ObstacleShape shape, glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled) {
+        m_obstacleShape  = shape;
         m_obstaclePos    = position;
         m_obstacleVel    = velocity;
         m_obstacleRadius = radius;
@@ -251,16 +270,46 @@ namespace VCX::Labs::Fluid {
                 continue;
             }
 
-            glm::vec3 delta = pos - obstaclePos;
-            float     dist2 = glm::dot(delta, delta);
-            float     minDist = obstacleRadius + m_particleRadius;
-            if (dist2 >= minDist * minDist) {
+            if (m_obstacleShape == ObstacleShape::Sphere) {
+                glm::vec3 delta = pos - obstaclePos;
+                float     dist2 = glm::dot(delta, delta);
+                float     minDist = obstacleRadius + m_particleRadius;
+                if (dist2 >= minDist * minDist) {
+                    continue;
+                }
+
+                float dist = std::sqrt(std::max(dist2, kEps));
+                glm::vec3 normal = dist > kEps ? delta / dist : glm::vec3(0.0f, 1.0f, 0.0f);
+                pos              = obstaclePos + normal * minDist;
+
+                glm::vec3 relVel = vel - obstacleVel;
+                float     vn     = glm::dot(relVel, normal);
+                if (vn < 0.0f) {
+                    relVel -= vn * normal;
+                }
+                vel = relVel + obstacleVel;
                 continue;
             }
 
-            float dist = std::sqrt(std::max(dist2, kEps));
-            glm::vec3 normal = dist > kEps ? delta / dist : glm::vec3(0.0f, 1.0f, 0.0f);
-            pos              = obstaclePos + normal * minDist;
+            glm::vec3 const halfExtent = glm::vec3(obstacleRadius + m_particleRadius);
+            glm::vec3 const local = pos - obstaclePos;
+            if (std::abs(local.x) > halfExtent.x || std::abs(local.y) > halfExtent.y || std::abs(local.z) > halfExtent.z) {
+                continue;
+            }
+
+            glm::vec3 penetration = halfExtent - glm::abs(local);
+            int       axis = 0;
+            if (penetration.y < penetration.x) axis = 1;
+            if (penetration.z < penetration[axis]) axis = 2;
+
+            float sign = local[axis] >= 0.0f ? 1.0f : -1.0f;
+            if (std::abs(local[axis]) <= kEps) {
+                sign = vel[axis] >= obstacleVel[axis] ? 1.0f : -1.0f;
+            }
+
+            glm::vec3 normal(0.0f);
+            normal[axis] = sign;
+            pos[axis] = obstaclePos[axis] + sign * halfExtent[axis];
 
             glm::vec3 relVel = vel - obstacleVel;
             float     vn     = glm::dot(relVel, normal);
