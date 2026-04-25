@@ -8,6 +8,19 @@
 
 namespace VCX::Labs::Fluid {
     namespace {
+        constexpr int   kTetIndices[6][4] = {
+            { 0, 5, 1, 6 },
+            { 0, 5, 6, 4 },
+            { 0, 1, 2, 6 },
+            { 0, 2, 3, 6 },
+            { 0, 3, 7, 6 },
+            { 0, 7, 4, 6 },
+        };
+        constexpr glm::ivec3 kCubeOffsets[8] = {
+            { 0, 0, 0 }, { 1, 0, 0 }, { 1, 1, 0 }, { 0, 1, 0 },
+            { 0, 0, 1 }, { 1, 0, 1 }, { 1, 1, 1 }, { 0, 1, 1 },
+        };
+
         Engine::Model makeBoxModel(float halfExtent) {
             Engine::SurfaceMesh mesh;
             mesh.Positions = {
@@ -42,6 +55,7 @@ namespace VCX::Labs::Fluid {
                 (ndc.x * 0.5f + 0.5f) * float(canvasSize.first),
                 (1.0f - (ndc.y * 0.5f + 0.5f)) * float(canvasSize.second));
         }
+
     } // namespace
 
     const std::vector<glm::vec3> vertex_pos = {
@@ -65,9 +79,15 @@ namespace VCX::Labs::Fluid {
             Engine::GL::UniqueProgram({
                 Engine::GL::SharedShader("assets/shaders/flat.vert"),
                 Engine::GL::SharedShader("assets/shaders/flat.frag") })),
+        _surfaceProgram(
+            Engine::GL::UniqueProgram({
+                Engine::GL::SharedShader("assets/shaders/flat.vert"),
+                Engine::GL::SharedShader("assets/shaders/flat.frag") })),
         _sceneObject(1),
         _BoundaryItem(Engine::GL::VertexLayout()
-            .Add<glm::vec3>("position", Engine::GL::DrawFrequency::Stream, 0), Engine::GL::PrimitiveType::Lines) {
+            .Add<glm::vec3>("position", Engine::GL::DrawFrequency::Stream, 0), Engine::GL::PrimitiveType::Lines),
+        _surfaceItem(Engine::GL::VertexLayout()
+            .Add<glm::vec3>("position", Engine::GL::DrawFrequency::Stream, 0), Engine::GL::PrimitiveType::Triangles) {
         _cameraManager.AutoRotate = false;
         _program.BindUniformBlock("PassConstants", 1);
         _lineprogram.GetUniforms().SetByName("u_Color", glm::vec3(1.0f));
@@ -94,6 +114,10 @@ namespace VCX::Labs::Fluid {
         ImGui::Text("Simulation Parameters:");
         ImGui::SliderFloat("Time Step", &_timeStep, 0.001f, 0.05f, "%.4f");
         ImGui::SliderFloat("FLIP Ratio", &_flipRatio, 0.0f, 1.0f, "%.2f");
+        ImGui::Checkbox("Mesh", &_showMesh);
+        if (_showMesh) {
+            ImGui::SliderInt("Mesh Detail", &_meshDetail, 1, 4);
+        }
         int obstacleType = static_cast<int>(_obstacleShape);
         if (ImGui::Combo("Obstacle Type", &obstacleType, "Sphere\0Cube\0")) {
             _obstacleShape = static_cast<ObstacleShape>(obstacleType);
@@ -114,6 +138,9 @@ namespace VCX::Labs::Fluid {
             _simulation.m_fRatio = _flipRatio;
             _simulation.SimulateTimestep(_timeStep);
         }
+        if (_showMesh) {
+            UpdateSurfaceMesh();
+        }
 
         _BoundaryItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(vertex_pos));
         _frame.Resize(desiredSize);
@@ -124,6 +151,9 @@ namespace VCX::Labs::Fluid {
         _sceneObject.PassConstantsBlock.Update(&VCX::Labs::Rendering::SceneObject::PassConstants::ViewPosition, _sceneObject.Camera.Eye);
         _lineprogram.GetUniforms().SetByName("u_Projection", _sceneObject.Camera.GetProjectionMatrix((float(desiredSize.first) / desiredSize.second)));
         _lineprogram.GetUniforms().SetByName("u_View", _sceneObject.Camera.GetViewMatrix());
+        _surfaceProgram.GetUniforms().SetByName("u_Projection", _sceneObject.Camera.GetProjectionMatrix((float(desiredSize.first) / desiredSize.second)));
+        _surfaceProgram.GetUniforms().SetByName("u_View", _sceneObject.Camera.GetViewMatrix());
+        _surfaceProgram.GetUniforms().SetByName("u_Color", glm::vec3(0.18f, 0.52f, 0.94f));
 
         if (_uniformDirty) {
             _uniformDirty = false;
@@ -141,9 +171,13 @@ namespace VCX::Labs::Fluid {
         _BoundaryItem.Draw({ _lineprogram.Use() });
         glLineWidth(1.f);
 
-        Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos, _simulation.m_particleColor);
-        m.Mesh.Draw({ _program.Use() },
-            _sphere.Mesh.Indices.size(), 0, _simulation.m_iNumSpheres);
+        if (_showMesh) {
+            _surfaceItem.Draw({ _surfaceProgram.Use() });
+        } else {
+            Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos, _simulation.m_particleColor);
+            m.Mesh.Draw({ _program.Use() },
+                _sphere.Mesh.Indices.size(), 0, _simulation.m_iNumSpheres);
+        }
 
         std::vector<glm::vec3> obstaclePos { _obstaclePos };
         std::vector<glm::vec3> obstacleColor { glm::vec3(0.95f, 0.6f, 0.2f) };
@@ -206,6 +240,9 @@ namespace VCX::Labs::Fluid {
         _obstacleSphere = Engine::Model { Engine::Sphere(10, _obstacleRadius), 0 };
         _obstacleBox = makeBoxModel(_obstacleRadius);
         _simulation.setObstacle(_obstacleShape, _obstaclePos, glm::vec3(0.0f), _obstacleRadius, true);
+        _simulation.transferVelocities(true, _flipRatio);
+        _simulation.updateParticleDensity();
+        UpdateSurfaceMesh();
         _stopped = true; // 初始静止
     }
 
@@ -278,5 +315,145 @@ namespace VCX::Labs::Fluid {
         float const dx = pos.x - center.x;
         float const dy = pos.y - center.y;
         return dx * dx + dy * dy <= radius * radius;
+    }
+
+    void CaseFluid::UpdateSurfaceMesh() {
+        int const nx = _simulation.cellCountX();
+        int const ny = _simulation.cellCountY();
+        int const nz = _simulation.cellCountZ();
+        if (nx < 2 || ny < 2 || nz < 2) {
+            return;
+        }
+
+        int const refine = std::max(1, _meshDetail);
+        int const fx = (nx - 1) * refine + 1;
+        int const fy = (ny - 1) * refine + 1;
+        int const fz = (nz - 1) * refine + 1;
+        float const fineH = _simulation.m_h / float(refine);
+        float const restDensity = std::max(_simulation.m_particleRestDensity, 1e-4f);
+        float const isoValue    = 0.55f;
+
+        auto coarseDensityAt = [&](int i, int j, int k) {
+            i = std::clamp(i, 0, nx - 1);
+            j = std::clamp(j, 0, ny - 1);
+            k = std::clamp(k, 0, nz - 1);
+            return _simulation.m_particleDensity[_simulation.index2GridOffset(glm::ivec3(i, j, k))] / restDensity;
+        };
+
+        auto densityAt = [&](int i, int j, int k) {
+            float gx = float(i) / float(refine);
+            float gy = float(j) / float(refine);
+            float gz = float(k) / float(refine);
+
+            int const x0 = std::clamp(int(std::floor(gx)), 0, nx - 1);
+            int const y0 = std::clamp(int(std::floor(gy)), 0, ny - 1);
+            int const z0 = std::clamp(int(std::floor(gz)), 0, nz - 1);
+            int const x1 = std::min(x0 + 1, nx - 1);
+            int const y1 = std::min(y0 + 1, ny - 1);
+            int const z1 = std::min(z0 + 1, nz - 1);
+
+            float const tx = std::clamp(gx - float(x0), 0.0f, 1.0f);
+            float const ty = std::clamp(gy - float(y0), 0.0f, 1.0f);
+            float const tz = std::clamp(gz - float(z0), 0.0f, 1.0f);
+
+            float const c000 = coarseDensityAt(x0, y0, z0);
+            float const c100 = coarseDensityAt(x1, y0, z0);
+            float const c010 = coarseDensityAt(x0, y1, z0);
+            float const c110 = coarseDensityAt(x1, y1, z0);
+            float const c001 = coarseDensityAt(x0, y0, z1);
+            float const c101 = coarseDensityAt(x1, y0, z1);
+            float const c011 = coarseDensityAt(x0, y1, z1);
+            float const c111 = coarseDensityAt(x1, y1, z1);
+
+            float const c00 = glm::mix(c000, c100, tx);
+            float const c10 = glm::mix(c010, c110, tx);
+            float const c01 = glm::mix(c001, c101, tx);
+            float const c11 = glm::mix(c011, c111, tx);
+            float const c0 = glm::mix(c00, c10, ty);
+            float const c1 = glm::mix(c01, c11, ty);
+            return glm::mix(c0, c1, tz);
+        };
+
+        auto emitTriangle = [&](std::vector<glm::vec3> & positions, std::vector<std::uint32_t> & indices, glm::vec3 const & a, glm::vec3 const & b, glm::vec3 const & c) {
+            std::uint32_t const base = static_cast<std::uint32_t>(positions.size());
+            positions.insert(positions.end(), { a, b, c });
+            indices.insert(indices.end(), { base, base + 1, base + 2 });
+        };
+
+        auto interpolate = [&](glm::vec3 const & pa, float va, glm::vec3 const & pb, float vb) {
+            float const denom = std::abs(vb - va) > 1e-6f ? (vb - va) : 1e-6f;
+            float const t = std::clamp((isoValue - va) / denom, 0.0f, 1.0f);
+            return glm::mix(pa, pb, t);
+        };
+
+        std::vector<glm::vec3>     positions;
+        std::vector<std::uint32_t> indices;
+        positions.reserve(30000);
+        indices.reserve(30000);
+
+        for (int i = 0; i < fx - 1; ++i) {
+            for (int j = 0; j < fy - 1; ++j) {
+                for (int k = 0; k < fz - 1; ++k) {
+                    glm::vec3 nodePos[8];
+                    float     nodeValue[8];
+                    int       insideCube = 0;
+
+                    for (int v = 0; v < 8; ++v) {
+                        glm::ivec3 const coord = glm::ivec3(i, j, k) + kCubeOffsets[v];
+                        nodePos[v]   = glm::vec3(0.5f * _simulation.m_h - 0.5f) + glm::vec3(coord) * fineH;
+                        nodeValue[v] = densityAt(coord.x, coord.y, coord.z);
+                        insideCube  += nodeValue[v] >= isoValue ? 1 : 0;
+                    }
+
+                    if (insideCube == 0 || insideCube == 8) {
+                        continue;
+                    }
+
+                    for (auto const & tet : kTetIndices) {
+                        int inside[4];
+                        int outside[4];
+                        int insideCount  = 0;
+                        int outsideCount = 0;
+
+                        for (int t = 0; t < 4; ++t) {
+                            int const id = tet[t];
+                            if (nodeValue[id] >= isoValue) {
+                                inside[insideCount++] = id;
+                            } else {
+                                outside[outsideCount++] = id;
+                            }
+                        }
+
+                        if (insideCount == 0 || insideCount == 4) {
+                            continue;
+                        }
+
+                        if (insideCount == 1 || insideCount == 3) {
+                            int const apex = insideCount == 1 ? inside[0] : outside[0];
+                            int const * rim = insideCount == 1 ? outside : inside;
+                            glm::vec3 const a = interpolate(nodePos[apex], nodeValue[apex], nodePos[rim[0]], nodeValue[rim[0]]);
+                            glm::vec3 const b = interpolate(nodePos[apex], nodeValue[apex], nodePos[rim[1]], nodeValue[rim[1]]);
+                            glm::vec3 const c = interpolate(nodePos[apex], nodeValue[apex], nodePos[rim[2]], nodeValue[rim[2]]);
+                            if (insideCount == 1) {
+                                emitTriangle(positions, indices, a, b, c);
+                            } else {
+                                emitTriangle(positions, indices, a, c, b);
+                            }
+                            continue;
+                        }
+
+                        glm::vec3 const ac = interpolate(nodePos[inside[0]], nodeValue[inside[0]], nodePos[outside[0]], nodeValue[outside[0]]);
+                        glm::vec3 const ad = interpolate(nodePos[inside[0]], nodeValue[inside[0]], nodePos[outside[1]], nodeValue[outside[1]]);
+                        glm::vec3 const bc = interpolate(nodePos[inside[1]], nodeValue[inside[1]], nodePos[outside[0]], nodeValue[outside[0]]);
+                        glm::vec3 const bd = interpolate(nodePos[inside[1]], nodeValue[inside[1]], nodePos[outside[1]], nodeValue[outside[1]]);
+                        emitTriangle(positions, indices, ac, ad, bc);
+                        emitTriangle(positions, indices, ad, bd, bc);
+                    }
+                }
+            }
+        }
+
+        _surfaceItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(positions));
+        _surfaceItem.UpdateElementBuffer(indices);
     }
 }
