@@ -39,12 +39,18 @@ namespace VCX::Labs::Fluid {
         float                               _BndWidth { 2.0 };
         bool                                _stopped { false };
         Engine::Model                       _sphere;
+        Engine::Model                       _obstacleSphere;
         int                                 _res { 24 };
         float                               _timeStep { 0.016f };
         float                               _flipRatio { 0.95f };
+        glm::vec3                           _obstaclePos { 0.18f, -0.1f, 0.0f };
+        glm::vec3                           _obstacleVel { 0.0f };
+        float                               _obstacleRadius { 0.09f };
+        bool                                _draggingObstacle { false };
 
         Simulator _simulation;
 
         void ResetSystem();
+        void SyncObstacle(float dt);
     };
 } // namespace VCX::Labs::Fluid

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <glm/glm.hpp>
@@ -43,6 +45,10 @@ namespace VCX::Labs::Fluid {
         float              m_particleRestDensity;
 
         glm::vec3 gravity { 0, -9.81f, 0 };
+        glm::vec3 m_obstaclePos { 0.18f, -0.1f, 0.0f };
+        glm::vec3 m_obstacleVel { 0.0f };
+        float     m_obstacleRadius { 0.09f };
+        bool      m_enableObstacle { true };
 
         void integrateParticles(float timeStep);
         void pushParticlesApart(int numIters);
@@ -52,29 +58,63 @@ namespace VCX::Labs::Fluid {
         void        transferVelocities(bool toGrid, float flipRatio);
         void        solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift);
         void        updateParticleColors();
-        inline bool isValidVelocity(int i, int j, int k, int dir);
-        inline int  index2GridOffset(glm::ivec3 index);
+        void        setObstacle(glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled);
+        inline bool isValidVelocity(int i, int j, int k, int dir) const {
+            if (i < 0 || j < 0 || k < 0 || i >= m_iCellX || j >= m_iCellY || k >= m_iCellZ) {
+                return false;
+            }
+
+            if (dir == 0) {
+                return j < cellCountY() && k < cellCountZ();
+            }
+            if (dir == 1) {
+                return i < cellCountX() && k < cellCountZ();
+            }
+            return i < cellCountX() && j < cellCountY();
+        }
+        inline int index2GridOffset(glm::ivec3 index) const {
+            return index.x * m_iCellY * m_iCellZ + index.y * m_iCellZ + index.z;
+        }
+        inline bool isValidCell(glm::ivec3 index) const {
+            return index.x >= 0 && index.y >= 0 && index.z >= 0 &&
+                   index.x < cellCountX() && index.y < cellCountY() && index.z < cellCountZ();
+        }
+        inline int cellCountX() const {
+            return m_iCellX - 1;
+        }
+        inline int cellCountY() const {
+            return m_iCellY - 1;
+        }
+        inline int cellCountZ() const {
+            return m_iCellZ - 1;
+        }
 
         void SimulateTimestep(float const dt) {
-            int   numSubSteps       = 1;
+            float maxSpeed = glm::length(m_obstacleVel);
+            for (glm::vec3 const & vel : m_particleVel) {
+                maxSpeed = std::max(maxSpeed, glm::length(vel));
+            }
+
+            int   numSubSteps       = std::clamp(int(std::ceil(std::max(1.0f, dt * std::max(maxSpeed, 2.0f) / (0.45f * m_h)))), 1, 6);
             int   numParticleIters  = 2;
-            int   numPressureIters  = 40;  // 增加到40以提高收敛性
+            int   numPressureIters  = 50;
             bool  separateParticles = true;
-            float overRelaxation    = 1.5f;  // 降低到1.5提高稳定性
+            float overRelaxation    = 1.9f;
             bool  compensateDrift   = true;
 
             float     flipRatio = m_fRatio;
-            glm::vec3 obstaclePos(0.0f);
-            glm::vec3 obstacleVel(0.0f);
+            glm::vec3 obstaclePos = m_obstaclePos;
+            glm::vec3 obstacleVel = m_obstacleVel;
+            float     obstacleRadius = m_enableObstacle ? m_obstacleRadius : 0.0f;
 
             float sdt = dt / numSubSteps;
 
             for (int step = 0; step < numSubSteps; step++) {
                 integrateParticles(sdt);
-                handleParticleCollisions(obstaclePos, 0.0, obstacleVel);
+                handleParticleCollisions(obstaclePos, obstacleRadius, obstacleVel);
                 if (separateParticles)
                     pushParticlesApart(numParticleIters);
-                handleParticleCollisions(obstaclePos, 0.0, obstacleVel);
+                handleParticleCollisions(obstaclePos, obstacleRadius, obstacleVel);
                 transferVelocities(true, flipRatio);
                 updateParticleDensity();
                 solveIncompressibility(numPressureIters, sdt, overRelaxation, compensateDrift);
@@ -146,24 +186,26 @@ namespace VCX::Labs::Fluid {
             for (int i = 0; i < numX; i++) {
                 for (int j = 0; j < numY; j++) {
                     for (int k = 0; k < numZ; k++) {
-                        m_particlePos[p++] = glm::vec3(m_h + point_r + dx * i + (j % 2 == 0 ? 0.0 : point_r), m_h + point_r + dy * j, m_h + point_r + dz * k + (j % 2 == 0 ? 0.0 : point_r)) + glm::vec3(-0.5f);
+                        m_particlePos[p++] = glm::vec3(
+                            m_h + point_r + dx * i + (j % 2 == 0 ? 0.0f : point_r),
+                            m_h + point_r + dy * j,
+                            m_h + point_r + dz * k + (j % 2 == 0 ? 0.0f : point_r)) +
+                            glm::vec3(-0.5f);
                     }
                 }
             }
-            // setup grid cells for tank
-            int n = m_iCellY * m_iCellZ;
-            int m = m_iCellZ;
 
-            for (int i = 0; i < m_iCellX; i++) {
-                for (int j = 0; j < m_iCellY; j++) {
-                    for (int k = 0; k < m_iCellZ; k++) {
-                        float s = 1.0; // fluid
-                        if (i == 0 || i >= m_iCellX - 2 || j == 0 || j >= m_iCellY - 2 || k == 0 || k >= m_iCellZ - 2)
-                            s = 0.0f; // solid
-                        m_s[i * n + j * m + k] = s;
+            std::fill(m_s.begin(), m_s.end(), 0.0f);
+            for (int i = 0; i < cellCountX(); i++) {
+                for (int j = 0; j < cellCountY(); j++) {
+                    for (int k = 0; k < cellCountZ(); k++) {
+                        bool const isWall = (i == 0 || i == cellCountX() - 1 || j == 0 || j == cellCountY() - 1 || k == 0 || k == cellCountZ() - 1);
+                        m_s[index2GridOffset(glm::ivec3(i, j, k))] = isWall ? 0.0f : 1.0f;
                     }
                 }
             }
+
+            setObstacle(m_obstaclePos, glm::vec3(0.0f), m_obstacleRadius, m_enableObstacle);
         }
     };
 } // namespace VCX::Labs::Fluid
