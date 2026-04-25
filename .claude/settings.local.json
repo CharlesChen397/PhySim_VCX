@@ -10,7 +10,12 @@
       "Bash(./test_div)",
       "Bash(g++ -std=c++17 test_divergence.cpp -o test_div)",
       "Bash(git reset *)",
-      "Bash(xmake -P . build lab2)"
+      "Bash(xmake -P . build lab2)",
+      "Bash(git push *)",
+      "Bash(cmake --build build --target VCX_Lab2_FluidSimulation -j8)",
+      "Bash(cmake ..)",
+      "Bash(cmake --build . --target VCX_Lab2_FluidSimulation -j8)",
+      "Bash(git checkout *)"
     ]
   }
 }
