@@ -285,8 +285,38 @@ namespace VCX::Labs::Fluid {
     }
 
     void Simulator::updateParticleColors() {
+        // 计算最大速度用于归一化
+        float maxSpeed = 0.001f;
         for (int i = 0; i < m_iNumSpheres; i++) {
-            m_particleColor[i] = glm::vec3(0.0f, 0.5f, 1.0f);
+            float speed = glm::length(m_particleVel[i]);
+            if (speed > maxSpeed) maxSpeed = speed;
+        }
+
+        // 按速度染色：蓝色(慢) -> 青色 -> 绿色 -> 黄色 -> 红色(快)
+        for (int i = 0; i < m_iNumSpheres; i++) {
+            float speed = glm::length(m_particleVel[i]);
+            float t = speed / maxSpeed;
+
+            // 使用HSV到RGB的转换，色相从蓝色(240度)到红色(0度)
+            float hue = (1.0f - t) * 240.0f;
+            float h = hue / 60.0f;
+            int hi = int(h) % 6;
+            float f = h - int(h);
+
+            float v = 1.0f;
+            float s = 0.8f;
+            float p = v * (1.0f - s);
+            float q = v * (1.0f - f * s);
+            float r = v * (1.0f - (1.0f - f) * s);
+
+            switch(hi) {
+                case 0: m_particleColor[i] = glm::vec3(v, r, p); break;
+                case 1: m_particleColor[i] = glm::vec3(q, v, p); break;
+                case 2: m_particleColor[i] = glm::vec3(p, v, r); break;
+                case 3: m_particleColor[i] = glm::vec3(p, q, v); break;
+                case 4: m_particleColor[i] = glm::vec3(r, p, v); break;
+                case 5: m_particleColor[i] = glm::vec3(v, p, q); break;
+            }
         }
     }
 

@@ -96,7 +96,7 @@ namespace VCX::Labs::Fluid {
         _BoundaryItem.Draw({ _lineprogram.Use() });
         glLineWidth(1.f);
 
-        Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos);
+        Rendering::ModelObject m = Rendering::ModelObject(_sphere, _simulation.m_particlePos, _simulation.m_particleColor);
         auto const & material = _sceneObject.Materials[0];
         m.Mesh.Draw({ material.Albedo.Use(), material.MetaSpec.Use(), material.Height.Use(), _program.Use() },
             _sphere.Mesh.Indices.size(), 0, _simulation.m_iNumSpheres);
