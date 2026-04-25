@@ -1,15 +1,226 @@
 #include "FluidSimulator.h"
 
+#include <array>
+#include <cmath>
+#include <limits>
+
 namespace VCX::Labs::Fluid {
 
-    void Simulator::integrateParticles(float timeStep) {
-        const float maxVelocity = 10.0f; // 限制最大速度
+    namespace {
+        constexpr int   EMPTY_CELL = 0;
+        constexpr int   FLUID_CELL = 1;
+        constexpr int   SOLID_CELL = 2;
+        constexpr float kEps       = 1e-6f;
 
-        for (int i = 0; i < m_iNumSpheres; i++) {
+        float & component(glm::vec3 & value, int dir) {
+            return dir == 0 ? value.x : (dir == 1 ? value.y : value.z);
+        }
+
+        float component(glm::vec3 const & value, int dir) {
+            return dir == 0 ? value.x : (dir == 1 ? value.y : value.z);
+        }
+    } // namespace
+
+    namespace {
+        glm::vec3 cellCenter(Simulator const & sim, glm::ivec3 index) {
+            return glm::vec3(index) * sim.m_h + glm::vec3(0.5f * sim.m_h - 0.5f);
+        }
+
+        glm::vec3 faceCenter(Simulator const & sim, glm::ivec3 index, int dir) {
+            glm::vec3 center = glm::vec3(index) * sim.m_h + glm::vec3(-0.5f);
+            center[(dir + 1) % 3] += 0.5f * sim.m_h;
+            center[(dir + 2) % 3] += 0.5f * sim.m_h;
+            return center;
+        }
+
+        template<typename Fn>
+        void forEachCellWeight(Simulator const & sim, glm::vec3 const & pos, Fn && fn) {
+            glm::vec3 const coord = (pos + glm::vec3(0.5f)) / sim.m_h - glm::vec3(0.5f);
+            glm::ivec3 const base = glm::ivec3(glm::floor(coord));
+            glm::vec3 const frac  = coord - glm::vec3(base);
+
+            std::array<std::pair<int, float>, 8> entries {};
+            int                                  count = 0;
+            float                                wsum  = 0.0f;
+
+            for (int dx = 0; dx <= 1; ++dx) {
+                for (int dy = 0; dy <= 1; ++dy) {
+                    for (int dz = 0; dz <= 1; ++dz) {
+                        glm::ivec3 const index = base + glm::ivec3(dx, dy, dz);
+                        if (! sim.isValidCell(index)) {
+                            continue;
+                        }
+                        float const wx = dx ? frac.x : (1.0f - frac.x);
+                        float const wy = dy ? frac.y : (1.0f - frac.y);
+                        float const wz = dz ? frac.z : (1.0f - frac.z);
+                        float const w  = wx * wy * wz;
+                        if (w <= 0.0f) {
+                            continue;
+                        }
+                        entries[count++] = { sim.index2GridOffset(index), w };
+                        wsum += w;
+                    }
+                }
+            }
+
+            if (wsum <= kEps) {
+                return;
+            }
+            for (int i = 0; i < count; ++i) {
+                fn(entries[i].first, entries[i].second / wsum);
+            }
+        }
+
+        template<typename Fn>
+        void forEachFaceWeight(Simulator const & sim, glm::vec3 const & pos, int dir, Fn && fn) {
+            glm::vec3 coord = (pos + glm::vec3(0.5f)) / sim.m_h;
+            if (dir != 0) coord.x -= 0.5f;
+            if (dir != 1) coord.y -= 0.5f;
+            if (dir != 2) coord.z -= 0.5f;
+
+            glm::ivec3 const base = glm::ivec3(glm::floor(coord));
+            glm::vec3 const frac  = coord - glm::vec3(base);
+
+            std::array<std::pair<int, float>, 8> entries {};
+            int                                  count = 0;
+            float                                wsum  = 0.0f;
+
+            for (int dx = 0; dx <= 1; ++dx) {
+                for (int dy = 0; dy <= 1; ++dy) {
+                    for (int dz = 0; dz <= 1; ++dz) {
+                        glm::ivec3 const index = base + glm::ivec3(dx, dy, dz);
+                        if (! sim.isValidVelocity(index.x, index.y, index.z, dir)) {
+                            continue;
+                        }
+                        float const wx = dx ? frac.x : (1.0f - frac.x);
+                        float const wy = dy ? frac.y : (1.0f - frac.y);
+                        float const wz = dz ? frac.z : (1.0f - frac.z);
+                        float const w  = wx * wy * wz;
+                        if (w <= 0.0f) {
+                            continue;
+                        }
+                        entries[count++] = { sim.index2GridOffset(index), w };
+                        wsum += w;
+                    }
+                }
+            }
+
+            if (wsum <= kEps) {
+                return;
+            }
+            for (int i = 0; i < count; ++i) {
+                fn(entries[i].first, entries[i].second / wsum);
+            }
+        }
+
+        void rebuildSolidMask(Simulator & sim) {
+            std::fill(sim.m_s.begin(), sim.m_s.end(), 0.0f);
+            for (int i = 0; i < sim.cellCountX(); ++i) {
+                for (int j = 0; j < sim.cellCountY(); ++j) {
+                    for (int k = 0; k < sim.cellCountZ(); ++k) {
+                        glm::ivec3 const index(i, j, k);
+                        bool const boundary =
+                            i == 0 || j == 0 || k == 0 ||
+                            i == sim.cellCountX() - 1 ||
+                            j == sim.cellCountY() - 1 ||
+                            k == sim.cellCountZ() - 1;
+
+                        bool obstacleSolid = false;
+                        if (sim.m_enableObstacle) {
+                            glm::vec3 const center = cellCenter(sim, index);
+                            obstacleSolid = glm::length(center - sim.m_obstaclePos) < sim.m_obstacleRadius + 0.5f * sim.m_h;
+                        }
+
+                        sim.m_s[sim.index2GridOffset(index)] = (boundary || obstacleSolid) ? 0.0f : 1.0f;
+                    }
+                }
+            }
+        }
+
+        bool isObstacleFace(Simulator const & sim, glm::ivec3 faceIndex, int dir) {
+            if (! sim.m_enableObstacle) {
+                return false;
+            }
+            glm::vec3 const center = faceCenter(sim, faceIndex, dir);
+            return glm::length(center - sim.m_obstaclePos) <= sim.m_obstacleRadius + 0.35f * sim.m_h;
+        }
+
+        void applyBoundaryVelocities(Simulator & sim) {
+            for (int dir = 0; dir < 3; ++dir) {
+                for (int i = 0; i < sim.m_iCellX; ++i) {
+                    for (int j = 0; j < sim.m_iCellY; ++j) {
+                        for (int k = 0; k < sim.m_iCellZ; ++k) {
+                            if (! sim.isValidVelocity(i, j, k, dir)) {
+                                continue;
+                            }
+
+                            glm::ivec3 const face(i, j, k);
+                            glm::ivec3 left  = face;
+                            glm::ivec3 right = face;
+                            left[dir] -= 1;
+
+                            bool const leftSolid  = ! sim.isValidCell(left) || sim.m_s[sim.index2GridOffset(left)] == 0.0f;
+                            bool const rightSolid = ! sim.isValidCell(right) || sim.m_s[sim.index2GridOffset(right)] == 0.0f;
+                            bool const wallFace   = leftSolid || rightSolid;
+
+                            if (! wallFace) {
+                                continue;
+                            }
+
+                            float target = 0.0f;
+                            if (isObstacleFace(sim, face, dir)) {
+                                target = component(sim.m_obstacleVel, dir);
+                            }
+                            component(sim.m_vel[sim.index2GridOffset(face)], dir) = target;
+                        }
+                    }
+                }
+            }
+        }
+
+        void rebuildParticleBins(Simulator & sim) {
+            std::fill(sim.m_hashtableindex.begin(), sim.m_hashtableindex.end(), 0);
+
+            auto particleCell = [&](glm::vec3 const & pos) {
+                glm::vec3 coord = (pos + glm::vec3(0.5f)) / sim.m_h;
+                glm::ivec3 cell = glm::ivec3(glm::floor(coord));
+                cell.x          = std::clamp(cell.x, 0, sim.cellCountX() - 1);
+                cell.y          = std::clamp(cell.y, 0, sim.cellCountY() - 1);
+                cell.z          = std::clamp(cell.z, 0, sim.cellCountZ() - 1);
+                return cell;
+            };
+
+            for (glm::vec3 const & pos : sim.m_particlePos) {
+                glm::ivec3 const cell = particleCell(pos);
+                sim.m_hashtableindex[sim.index2GridOffset(cell) + 1]++;
+            }
+
+            for (int i = 1; i <= sim.m_iNumCells; ++i) {
+                sim.m_hashtableindex[i] += sim.m_hashtableindex[i - 1];
+            }
+
+            std::vector<int> next = sim.m_hashtableindex;
+            for (int p = 0; p < sim.m_iNumSpheres; ++p) {
+                glm::ivec3 const cell = particleCell(sim.m_particlePos[p]);
+                sim.m_hashtable[next[sim.index2GridOffset(cell)]++] = p;
+            }
+        }
+    } // namespace
+
+    void Simulator::setObstacle(glm::vec3 const & position, glm::vec3 const & velocity, float radius, bool enabled) {
+        m_obstaclePos    = position;
+        m_obstacleVel    = velocity;
+        m_obstacleRadius = radius;
+        m_enableObstacle = enabled;
+    }
+
+    void Simulator::integrateParticles(float timeStep) {
+        float const maxVelocity = 3.0f / std::max(m_h, kEps);
+
+        for (int i = 0; i < m_iNumSpheres; ++i) {
             m_particleVel[i] += gravity * timeStep;
 
-            // 限制速度大小防止爆炸
-            float speed = glm::length(m_particleVel[i]);
+            float const speed = glm::length(m_particleVel[i]);
             if (speed > maxVelocity) {
                 m_particleVel[i] *= maxVelocity / speed;
             }
@@ -19,317 +230,274 @@ namespace VCX::Labs::Fluid {
     }
 
     void Simulator::handleParticleCollisions(glm::vec3 obstaclePos, float obstacleRadius, glm::vec3 obstacleVel) {
-        for (int i = 0; i < m_iNumSpheres; i++) {
-            glm::vec3& pos = m_particlePos[i];
-            glm::vec3& vel = m_particleVel[i];
+        float const minBound = -0.5f + m_h + m_particleRadius;
+        float const maxBound = 0.5f - m_h - m_particleRadius;
 
-            // 边界碰撞 - 使用正确的坐标计算
-            if (pos.x < 0.5f * m_h + m_particleRadius - 0.5f) {
-                pos.x = 0.5f * m_h + m_particleRadius - 0.5f;
-                vel.x = 0.0f;
-            }
-            if (pos.x > 0.5f - 0.5f * m_h - m_particleRadius) {
-                pos.x = 0.5f - 0.5f * m_h - m_particleRadius;
-                vel.x = 0.0f;
-            }
+        for (int i = 0; i < m_iNumSpheres; ++i) {
+            glm::vec3 & pos = m_particlePos[i];
+            glm::vec3 & vel = m_particleVel[i];
 
-            if (pos.y < 0.5f * m_h + m_particleRadius - 0.5f) {
-                pos.y = 0.5f * m_h + m_particleRadius - 0.5f;
-                vel.y = 0.0f;
-            }
-            if (pos.y > 0.5f - 0.5f * m_h - m_particleRadius) {
-                pos.y = 0.5f - 0.5f * m_h - m_particleRadius;
-                vel.y = 0.0f;
-            }
-
-            if (pos.z < 0.5f * m_h + m_particleRadius - 0.5f) {
-                pos.z = 0.5f * m_h + m_particleRadius - 0.5f;
-                vel.z = 0.0f;
-            }
-            if (pos.z > 0.5f - 0.5f * m_h - m_particleRadius) {
-                pos.z = 0.5f - 0.5f * m_h - m_particleRadius;
-                vel.z = 0.0f;
-            }
-
-            // 障碍物碰撞
-            if (obstacleRadius > 0.0f) {
-                glm::vec3 delta = pos - obstaclePos;
-                float dist = glm::length(delta);
-                if (dist < m_particleRadius + obstacleRadius) {
-                    glm::vec3 normal = delta / dist;
-                    pos = obstaclePos + (m_particleRadius + obstacleRadius) * normal;
-                    glm::vec3 deltaVel = vel - obstacleVel;
-                    float deltaVelN = glm::dot(deltaVel, normal);
-                    if (deltaVelN < 0) {
-                        vel -= deltaVelN * normal;
-                    }
+            for (int dir = 0; dir < 3; ++dir) {
+                if (pos[dir] < minBound) {
+                    pos[dir] = minBound;
+                    vel[dir] = 0.0f;
+                } else if (pos[dir] > maxBound) {
+                    pos[dir] = maxBound;
+                    vel[dir] = 0.0f;
                 }
             }
+
+            if (obstacleRadius <= 0.0f) {
+                continue;
+            }
+
+            glm::vec3 delta = pos - obstaclePos;
+            float     dist2 = glm::dot(delta, delta);
+            float     minDist = obstacleRadius + m_particleRadius;
+            if (dist2 >= minDist * minDist) {
+                continue;
+            }
+
+            float dist = std::sqrt(std::max(dist2, kEps));
+            glm::vec3 normal = dist > kEps ? delta / dist : glm::vec3(0.0f, 1.0f, 0.0f);
+            pos              = obstaclePos + normal * minDist;
+
+            glm::vec3 relVel = vel - obstacleVel;
+            float     vn     = glm::dot(relVel, normal);
+            if (vn < 0.0f) {
+                relVel -= vn * normal;
+            }
+            vel = relVel + obstacleVel;
         }
     }
 
     void Simulator::pushParticlesApart(int numIters) {
-        // 使用简化的哈希表实现
-        for (int iter = 0; iter < numIters; iter++) {
-            for (int i = 0; i < m_iNumSpheres; i++) {
-                for (int j = i + 1; j < m_iNumSpheres; j++) {
-                    glm::vec3 d = m_particlePos[i] - m_particlePos[j];
-                    float dist = glm::length(d + 1e-6f);
-                    if (dist < 2.0f * m_particleRadius) {
-                        glm::vec3 s = 0.5f * (2.0f * m_particleRadius - dist) / dist * d;
-                        m_particlePos[i] += s;
-                        m_particlePos[j] -= s;
+        rebuildParticleBins(*this);
+
+        float const minDist = 2.0f * m_particleRadius;
+        float const minDist2 = minDist * minDist;
+
+        for (int iter = 0; iter < numIters; ++iter) {
+            for (int p = 0; p < m_iNumSpheres; ++p) {
+                glm::vec3 const & pos = m_particlePos[p];
+                glm::vec3 coord       = (pos + glm::vec3(0.5f)) / m_h;
+                glm::ivec3 cell       = glm::ivec3(glm::floor(coord));
+                cell.x                = std::clamp(cell.x, 0, cellCountX() - 1);
+                cell.y                = std::clamp(cell.y, 0, cellCountY() - 1);
+                cell.z                = std::clamp(cell.z, 0, cellCountZ() - 1);
+
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        for (int dz = -1; dz <= 1; ++dz) {
+                            glm::ivec3 const neighbor = cell + glm::ivec3(dx, dy, dz);
+                            if (! isValidCell(neighbor)) {
+                                continue;
+                            }
+
+                            int const begin = m_hashtableindex[index2GridOffset(neighbor)];
+                            int const end   = m_hashtableindex[index2GridOffset(neighbor) + 1];
+                            for (int cursor = begin; cursor < end; ++cursor) {
+                                int const q = m_hashtable[cursor];
+                                if (q <= p) {
+                                    continue;
+                                }
+
+                                glm::vec3 delta = m_particlePos[p] - m_particlePos[q];
+                                float     dist2 = glm::dot(delta, delta);
+                                if (dist2 >= minDist2 || dist2 <= kEps) {
+                                    continue;
+                                }
+
+                                float     dist = std::sqrt(dist2);
+                                glm::vec3 push = 0.5f * (minDist - dist) * delta / dist;
+                                m_particlePos[p] += push;
+                                m_particlePos[q] -= push;
+                            }
+                        }
                     }
                 }
             }
+
+            handleParticleCollisions(m_obstaclePos, m_enableObstacle ? m_obstacleRadius : 0.0f, m_obstacleVel);
+            rebuildParticleBins(*this);
         }
     }
 
     void Simulator::updateParticleDensity() {
         std::fill(m_particleDensity.begin(), m_particleDensity.end(), 0.0f);
 
-        for (int i = 0; i < m_iNumSpheres; i++) {
-            glm::vec3 pos = m_particlePos[i];
-            // 关键：使用 0.5f + 0.5f * m_h 作为偏移
-            glm::vec3 rel_pos = pos + (0.5f + 0.5f * m_h);
-            glm::ivec3 index = glm::ivec3(rel_pos / m_h);
-            glm::vec3 delta = (rel_pos - glm::vec3(index) * m_h) / m_h;
-            glm::vec3 deltaComp = glm::vec3(1.0f) - delta;
-
-            // 三线性插值到8个邻居
-            m_particleDensity[index2GridOffset(index + glm::ivec3(0, 0, 0))] += deltaComp.x * deltaComp.y * deltaComp.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(1, 0, 0))] += delta.x * deltaComp.y * deltaComp.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(0, 1, 0))] += deltaComp.x * delta.y * deltaComp.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(1, 1, 0))] += delta.x * delta.y * deltaComp.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(0, 0, 1))] += deltaComp.x * deltaComp.y * delta.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(1, 0, 1))] += delta.x * deltaComp.y * delta.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(0, 1, 1))] += deltaComp.x * delta.y * delta.z;
-            m_particleDensity[index2GridOffset(index + glm::ivec3(1, 1, 1))] += delta.x * delta.y * delta.z;
+        for (glm::vec3 const & pos : m_particlePos) {
+            forEachCellWeight(*this, pos, [&](int gridOffset, float weight) {
+                m_particleDensity[gridOffset] += weight;
+            });
         }
 
-        // 计算静止密度
-        if (m_particleRestDensity == 0.0f) {
-            float sum = 0.0f;
-            int count = 0;
-            for (int i = 0; i < m_iNumCells; i++) {
-                if (m_type[i] == 1 && m_particleDensity[i] > 0.0f) {
-                    sum += m_particleDensity[i];
-                    count++;
+        if (m_particleRestDensity > 0.0f) {
+            return;
+        }
+
+        float sum   = 0.0f;
+        int   count = 0;
+        for (int i = 0; i < cellCountX(); ++i) {
+            for (int j = 0; j < cellCountY(); ++j) {
+                for (int k = 0; k < cellCountZ(); ++k) {
+                    int const idx = index2GridOffset(glm::ivec3(i, j, k));
+                    if (m_type[idx] != FLUID_CELL || m_particleDensity[idx] <= 0.0f) {
+                        continue;
+                    }
+                    sum += m_particleDensity[idx];
+                    ++count;
                 }
             }
-            if (count > 0) {
-                m_particleRestDensity = sum / count;
-            }
+        }
+        if (count > 0) {
+            m_particleRestDensity = sum / static_cast<float>(count);
         }
     }
 
     void Simulator::transferVelocities(bool toGrid, float flipRatio) {
         if (toGrid) {
-            // 清空网格速度
+            rebuildSolidMask(*this);
+
             std::fill(m_vel.begin(), m_vel.end(), glm::vec3(0.0f));
-            for (int i = 0; i < 3; i++) {
-                std::fill(m_near_num[i].begin(), m_near_num[i].end(), 0.0f);
+            for (int dir = 0; dir < 3; ++dir) {
+                std::fill(m_near_num[dir].begin(), m_near_num[dir].end(), 0.0f);
             }
 
-            // 标记cell类型
-            int n = m_iCellY * m_iCellZ;
-            int m_idx = m_iCellZ;
-            for (int i = 0; i < m_iCellX; i++) {
-                for (int j = 0; j < m_iCellY; j++) {
-                    for (int k = 0; k < m_iCellZ; k++) {
-                        int index = i * n + j * m_idx + k;
-                        if (m_s[index] == 0.0f) {
-                            m_type[index] = 2; // SOLID
-                        } else {
-                            m_type[index] = 0; // EMPTY
-                        }
+            std::fill(m_type.begin(), m_type.end(), SOLID_CELL);
+            for (int i = 0; i < cellCountX(); ++i) {
+                for (int j = 0; j < cellCountY(); ++j) {
+                    for (int k = 0; k < cellCountZ(); ++k) {
+                        int const idx = index2GridOffset(glm::ivec3(i, j, k));
+                        m_type[idx]   = (m_s[idx] == 0.0f) ? SOLID_CELL : EMPTY_CELL;
                     }
                 }
             }
-        }
 
-        // P2G 和 G2P
-        for (int p = 0; p < m_iNumSpheres; p++) {
-            glm::vec3 pos = m_particlePos[p];
+            for (glm::vec3 const & pos : m_particlePos) {
+                glm::ivec3 cell = glm::ivec3(glm::floor((pos + glm::vec3(0.5f)) / m_h));
+                cell.x          = std::clamp(cell.x, 0, cellCountX() - 1);
+                cell.y          = std::clamp(cell.y, 0, cellCountY() - 1);
+                cell.z          = std::clamp(cell.z, 0, cellCountZ() - 1);
 
-            // 标记粒子所在cell为流体
-            if (toGrid) {
-                glm::ivec3 index = glm::ivec3((pos + (0.5f + 0.5f * m_h)) / m_h);
-                if (m_type[index2GridOffset(index)] == 0) {
-                    m_type[index2GridOffset(index)] = 1; // FLUID
+                int const idx = index2GridOffset(cell);
+                if (m_type[idx] == EMPTY_CELL) {
+                    m_type[idx] = FLUID_CELL;
                 }
             }
 
-            // 对每个速度分量
-            for (int dir = 0; dir < 3; dir++) {
-                // 关键：offset计算
-                glm::vec3 offset = glm::vec3(-0.5f);
-                offset[dir] -= m_h * 0.5f;  // 注意是减去！
-
-                glm::vec3 rel_pos = pos - offset;
-                glm::ivec3 index = glm::ivec3(rel_pos / m_h);
-                glm::vec3 delta = (rel_pos - glm::vec3(index) * m_h) / m_h;
-                glm::vec3 deltaComp = glm::vec3(1.0f) - delta;
-
-                if (toGrid) {
-                    // P2G
-                    float vel = m_particleVel[p][dir];
-                    m_vel[index2GridOffset(index + glm::ivec3(0, 0, 0))][dir] += vel * deltaComp.x * deltaComp.y * deltaComp.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(1, 0, 0))][dir] += vel * delta.x * deltaComp.y * deltaComp.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(0, 1, 0))][dir] += vel * deltaComp.x * delta.y * deltaComp.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(1, 1, 0))][dir] += vel * delta.x * delta.y * deltaComp.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(0, 0, 1))][dir] += vel * deltaComp.x * deltaComp.y * delta.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(1, 0, 1))][dir] += vel * delta.x * deltaComp.y * delta.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(0, 1, 1))][dir] += vel * deltaComp.x * delta.y * delta.z;
-                    m_vel[index2GridOffset(index + glm::ivec3(1, 1, 1))][dir] += vel * delta.x * delta.y * delta.z;
-
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(0, 0, 0))] += deltaComp.x * deltaComp.y * deltaComp.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(1, 0, 0))] += delta.x * deltaComp.y * deltaComp.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(0, 1, 0))] += deltaComp.x * delta.y * deltaComp.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(1, 1, 0))] += delta.x * delta.y * deltaComp.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(0, 0, 1))] += deltaComp.x * deltaComp.y * delta.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(1, 0, 1))] += delta.x * deltaComp.y * delta.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(0, 1, 1))] += deltaComp.x * delta.y * delta.z;
-                    m_near_num[dir][index2GridOffset(index + glm::ivec3(1, 1, 1))] += delta.x * delta.y * delta.z;
-                } else {
-                    // G2P
-                    float vel = 0;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(0, 0, 0))][dir] * deltaComp.x * deltaComp.y * deltaComp.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(1, 0, 0))][dir] * delta.x * deltaComp.y * deltaComp.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(0, 1, 0))][dir] * deltaComp.x * delta.y * deltaComp.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(1, 1, 0))][dir] * delta.x * delta.y * deltaComp.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(0, 0, 1))][dir] * deltaComp.x * deltaComp.y * delta.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(1, 0, 1))][dir] * delta.x * deltaComp.y * delta.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(0, 1, 1))][dir] * deltaComp.x * delta.y * delta.z;
-                    vel += m_vel[index2GridOffset(index + glm::ivec3(1, 1, 1))][dir] * delta.x * delta.y * delta.z;
-
-                    float deltaVel = 0;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(0, 0, 0))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(0, 0, 0))][dir]) * deltaComp.x * deltaComp.y * deltaComp.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(1, 0, 0))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(1, 0, 0))][dir]) * delta.x * deltaComp.y * deltaComp.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(0, 1, 0))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(0, 1, 0))][dir]) * deltaComp.x * delta.y * deltaComp.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(1, 1, 0))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(1, 1, 0))][dir]) * delta.x * delta.y * deltaComp.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(0, 0, 1))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(0, 0, 1))][dir]) * deltaComp.x * deltaComp.y * delta.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(1, 0, 1))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(1, 0, 1))][dir]) * delta.x * deltaComp.y * delta.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(0, 1, 1))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(0, 1, 1))][dir]) * deltaComp.x * delta.y * delta.z;
-                    deltaVel += (m_vel[index2GridOffset(index + glm::ivec3(1, 1, 1))][dir] - m_pre_vel[index2GridOffset(index + glm::ivec3(1, 1, 1))][dir]) * delta.x * delta.y * delta.z;
-
-                    // FLIP95混合
-                    m_particleVel[p][dir] = (deltaVel + m_particleVel[p][dir]) * flipRatio + (1 - flipRatio) * vel;
+            for (int p = 0; p < m_iNumSpheres; ++p) {
+                for (int dir = 0; dir < 3; ++dir) {
+                    float const particleComponent = component(m_particleVel[p], dir);
+                    forEachFaceWeight(*this, m_particlePos[p], dir, [&](int gridOffset, float weight) {
+                        component(m_vel[gridOffset], dir) += particleComponent * weight;
+                        m_near_num[dir][gridOffset] += weight;
+                    });
                 }
             }
-        }
 
-        // 归一化网格速度
-        if (toGrid) {
-            for (int i = 0; i < m_iNumCells; i++) {
-                for (int dir = 0; dir < 3; dir++) {
+            for (int dir = 0; dir < 3; ++dir) {
+                for (int i = 0; i < m_iNumCells; ++i) {
                     if (m_near_num[dir][i] > 0.0f) {
-                        m_vel[i][dir] /= m_near_num[dir][i];
+                        component(m_vel[i], dir) /= m_near_num[dir][i];
+                    } else {
+                        component(m_vel[i], dir) = 0.0f;
                     }
                 }
+            }
+
+            applyBoundaryVelocities(*this);
+            return;
+        }
+
+        float const maxVelocity = 3.0f / std::max(m_h, kEps);
+        for (int p = 0; p < m_iNumSpheres; ++p) {
+            for (int dir = 0; dir < 3; ++dir) {
+                float pic = 0.0f;
+                float flip = component(m_particleVel[p], dir);
+                float wsum = 0.0f;
+
+                forEachFaceWeight(*this, m_particlePos[p], dir, [&](int gridOffset, float weight) {
+                    pic += component(m_vel[gridOffset], dir) * weight;
+                    flip += (component(m_vel[gridOffset], dir) - component(m_pre_vel[gridOffset], dir)) * weight;
+                    wsum += weight;
+                });
+
+                if (wsum > 0.0f) {
+                    component(m_particleVel[p], dir) = (1.0f - flipRatio) * pic + flipRatio * flip;
+                }
+            }
+
+            float const speed = glm::length(m_particleVel[p]);
+            if (speed > maxVelocity) {
+                m_particleVel[p] *= maxVelocity / speed;
             }
         }
     }
 
     void Simulator::solveIncompressibility(int numIters, float dt, float overRelaxation, bool compensateDrift) {
-        // 保存旧速度用于FLIP
         m_pre_vel = m_vel;
+        std::fill(m_p.begin(), m_p.end(), 0.0f);
 
-        for (int iter = 0; iter < numIters; iter++) {
-            for (int i = 1; i < m_iCellX - 1; i++) {
-                for (int j = 1; j < m_iCellY - 1; j++) {
-                    for (int k = 1; k < m_iCellZ - 1; k++) {
-                        int idx = index2GridOffset(glm::ivec3(i, j, k));
+        float const pressureScale = m_h / std::max(dt, kEps);
 
-                        if (m_type[idx] != 1) continue; // 只处理流体cell
+        for (int iter = 0; iter < numIters; ++iter) {
+            for (int i = 1; i < cellCountX() - 1; ++i) {
+                for (int j = 1; j < cellCountY() - 1; ++j) {
+                    for (int k = 1; k < cellCountZ() - 1; ++k) {
+                        glm::ivec3 const cell(i, j, k);
+                        int const         idx = index2GridOffset(cell);
+                        if (m_type[idx] != FLUID_CELL) {
+                            continue;
+                        }
 
-                        // 计算散度
                         float div =
-                            m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x - m_vel[idx].x +
-                            m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y - m_vel[idx].y +
-                            m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z - m_vel[idx].z;
+                            m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x - m_vel[index2GridOffset(glm::ivec3(i, j, k))].x +
+                            m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y - m_vel[index2GridOffset(glm::ivec3(i, j, k))].y +
+                            m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z - m_vel[index2GridOffset(glm::ivec3(i, j, k))].z;
 
-                        // 漂移补偿 - 使用更小的系数
                         if (compensateDrift && m_particleRestDensity > 0.0f) {
-                            float compression = m_particleDensity[idx] - m_particleRestDensity;
+                            float const compression = m_particleDensity[idx] - m_particleRestDensity;
                             if (compression > 0.0f) {
-                                div -= 0.5f * compression; // 降低补偿强度
+                                div -= 0.8f * compression;
                             }
                         }
 
-                        // 计算邻居的固体标记
-                        float s =
-                            m_s[index2GridOffset(glm::ivec3(i - 1, j, k))] +
-                            m_s[index2GridOffset(glm::ivec3(i + 1, j, k))] +
-                            m_s[index2GridOffset(glm::ivec3(i, j - 1, k))] +
-                            m_s[index2GridOffset(glm::ivec3(i, j + 1, k))] +
-                            m_s[index2GridOffset(glm::ivec3(i, j, k - 1))] +
-                            m_s[index2GridOffset(glm::ivec3(i, j, k + 1))];
+                        float const sx0 = m_s[index2GridOffset(glm::ivec3(i - 1, j, k))];
+                        float const sx1 = m_s[index2GridOffset(glm::ivec3(i + 1, j, k))];
+                        float const sy0 = m_s[index2GridOffset(glm::ivec3(i, j - 1, k))];
+                        float const sy1 = m_s[index2GridOffset(glm::ivec3(i, j + 1, k))];
+                        float const sz0 = m_s[index2GridOffset(glm::ivec3(i, j, k - 1))];
+                        float const sz1 = m_s[index2GridOffset(glm::ivec3(i, j, k + 1))];
+                        float const s   = sx0 + sx1 + sy0 + sy1 + sz0 + sz1;
+                        if (s <= kEps) {
+                            continue;
+                        }
 
-                        if (s < 0.01f) continue;
+                        float const pressureDelta = -overRelaxation * div / s;
+                        m_p[idx] += pressureScale * pressureDelta;
 
-                        // 压力修正
-                        float p = -div / s * overRelaxation;
-
-                        // 更新速度
-                        m_vel[idx].x -= p * m_s[index2GridOffset(glm::ivec3(i - 1, j, k))];
-                        m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x += p * m_s[index2GridOffset(glm::ivec3(i + 1, j, k))];
-                        m_vel[idx].y -= p * m_s[index2GridOffset(glm::ivec3(i, j - 1, k))];
-                        m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y += p * m_s[index2GridOffset(glm::ivec3(i, j + 1, k))];
-                        m_vel[idx].z -= p * m_s[index2GridOffset(glm::ivec3(i, j, k - 1))];
-                        m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z += p * m_s[index2GridOffset(glm::ivec3(i, j, k + 1))];
+                        m_vel[index2GridOffset(glm::ivec3(i, j, k))].x -= sx0 * pressureDelta;
+                        m_vel[index2GridOffset(glm::ivec3(i + 1, j, k))].x += sx1 * pressureDelta;
+                        m_vel[index2GridOffset(glm::ivec3(i, j, k))].y -= sy0 * pressureDelta;
+                        m_vel[index2GridOffset(glm::ivec3(i, j + 1, k))].y += sy1 * pressureDelta;
+                        m_vel[index2GridOffset(glm::ivec3(i, j, k))].z -= sz0 * pressureDelta;
+                        m_vel[index2GridOffset(glm::ivec3(i, j, k + 1))].z += sz1 * pressureDelta;
                     }
                 }
             }
+            applyBoundaryVelocities(*this);
         }
     }
 
     void Simulator::updateParticleColors() {
-        // 计算最大速度用于归一化
-        float maxSpeed = 0.001f;
-        for (int i = 0; i < m_iNumSpheres; i++) {
-            float speed = glm::length(m_particleVel[i]);
-            if (speed > maxSpeed) maxSpeed = speed;
+        for (int i = 0; i < m_iNumSpheres; ++i) {
+            float const speed = glm::length(m_particleVel[i]);
+            float const tint  = std::clamp(speed / 4.0f, 0.0f, 1.0f);
+            glm::vec3 const deepWater(0.12f, 0.42f, 0.92f);
+            glm::vec3 const foamTint(0.72f, 0.9f, 1.0f);
+            m_particleColor[i] = glm::mix(deepWater, foamTint, 0.2f + 0.5f * tint);
         }
-
-        // 按速度染色：蓝色(慢) -> 青色 -> 绿色 -> 黄色 -> 红色(快)
-        for (int i = 0; i < m_iNumSpheres; i++) {
-            float speed = glm::length(m_particleVel[i]);
-            float t = speed / maxSpeed;
-
-            // 使用HSV到RGB的转换，色相从蓝色(240度)到红色(0度)
-            float hue = (1.0f - t) * 240.0f;
-            float h = hue / 60.0f;
-            int hi = int(h) % 6;
-            float f = h - int(h);
-
-            float v = 1.0f;
-            float s = 0.8f;
-            float p = v * (1.0f - s);
-            float q = v * (1.0f - f * s);
-            float r = v * (1.0f - (1.0f - f) * s);
-
-            switch(hi) {
-                case 0: m_particleColor[i] = glm::vec3(v, r, p); break;
-                case 1: m_particleColor[i] = glm::vec3(q, v, p); break;
-                case 2: m_particleColor[i] = glm::vec3(p, v, r); break;
-                case 3: m_particleColor[i] = glm::vec3(p, q, v); break;
-                case 4: m_particleColor[i] = glm::vec3(r, p, v); break;
-                case 5: m_particleColor[i] = glm::vec3(v, p, q); break;
-            }
-        }
-    }
-
-    bool Simulator::isValidVelocity(int i, int j, int k, int dir) {
-        glm::ivec3 index(i, j, k);
-        if (m_type[index2GridOffset(index)] == 2) return false; // SOLID
-        index[dir] += 1;
-        if (m_type[index2GridOffset(index)] == 2) return false; // SOLID
-        return true;
-    }
-
-    int Simulator::index2GridOffset(glm::ivec3 index) {
-        return index.x * m_iCellY * m_iCellZ + index.y * m_iCellZ + index.z;
     }
 
 } // namespace VCX::Labs::Fluid
