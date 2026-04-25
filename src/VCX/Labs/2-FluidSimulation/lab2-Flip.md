@@ -99,10 +99,6 @@
         * 可以参考Lab0的参考示例，我们希望在这次作业中能够在一定范围内灵活调整时间步长以及`flipRatio`。
         * 如果你选择实现移动球形障碍物，你需要更改`FluidSimulator.h`文件中的`obstaclePos`和`obstacleVel`，球形障碍物的生成与渲染可以参考之前 Lab 0 中对流体粒子的实现。
 
-3. 基于 Taichi：  
-   需要从头构建仿真及交互流程。
-   - 并行计算：利用 ti.kernel 编写 map_p2g 和 map_g2p 过程。
-   - 可以参考 Taichi 官方文档或其 Gallery 中的 mls_mpm 示例 (python/taichi/examples/simulation/mpm88.py)，但请注意需要实现交错网格，以线性插值完成p2g 和 g2p。
 
 
 ## 作业提交

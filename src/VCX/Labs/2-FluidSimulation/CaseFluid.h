@@ -26,6 +26,7 @@ namespace VCX::Labs::Fluid {
     private:
         Engine::GL::UniqueProgram         _program;
         Engine::GL::UniqueProgram         _lineprogram;
+        Engine::GL::UniqueProgram         _surfaceProgram;
         Engine::GL::UniqueRenderFrame     _frame;
         VCX::Labs::Rendering::SceneObject _sceneObject;
         bool                              _uniformDirty { true };
@@ -35,6 +36,7 @@ namespace VCX::Labs::Fluid {
         int                               _attenuationOrder { 2 };
 
         Engine::GL::UniqueIndexedRenderItem _BoundaryItem;
+        Engine::GL::UniqueIndexedRenderItem _surfaceItem;
         Common::OrbitCameraManager          _cameraManager;
         float                               _BndWidth { 2.0 };
         bool                                _stopped { false };
@@ -44,6 +46,8 @@ namespace VCX::Labs::Fluid {
         int                                 _res { 24 };
         float                               _timeStep { 0.016f };
         float                               _flipRatio { 0.95f };
+        bool                                _showMesh { false };
+        int                                 _meshDetail { 2 };
         ObstacleShape                       _obstacleShape { ObstacleShape::Sphere };
         glm::vec3                           _obstaclePos { 0.18f, -0.1f, 0.0f };
         glm::vec3                           _obstacleVel { 0.0f };
@@ -57,5 +61,6 @@ namespace VCX::Labs::Fluid {
         void ResetSystem();
         void SyncObstacle(float dt);
         bool IsMouseOnObstacle(ImVec2 const & pos) const;
+        void UpdateSurfaceMesh();
     };
 } // namespace VCX::Labs::Fluid
