@@ -540,12 +540,17 @@ namespace VCX::Labs::Fluid {
     }
 
     void Simulator::updateParticleColors() {
+        float maxSpeed = 1e-4f;
         for (int i = 0; i < m_iNumSpheres; ++i) {
-            float const speed = glm::length(m_particleVel[i]);
-            float const tint  = std::clamp(speed / 4.0f, 0.0f, 1.0f);
-            glm::vec3 const deepWater(0.12f, 0.42f, 0.92f);
-            glm::vec3 const foamTint(0.72f, 0.9f, 1.0f);
-            m_particleColor[i] = glm::mix(deepWater, foamTint, 0.2f + 0.5f * tint);
+            maxSpeed = std::max(maxSpeed, glm::length(m_particleVel[i]));
+        }
+
+        for (int i = 0; i < m_iNumSpheres; ++i) {
+            float const speed01 = std::clamp(1.35f * glm::length(m_particleVel[i]) / maxSpeed, 0.0f, 1.0f);
+            float const tint    = 0.08f + 0.72f * std::pow(speed01, 0.65f);
+            glm::vec3 const deepBlue(0.02f, 0.08f, 0.38f);
+            glm::vec3 const lightBlue(0.32f, 0.56f, 0.92f);
+            m_particleColor[i] = glm::mix(deepBlue, lightBlue, tint);
         }
     }
 

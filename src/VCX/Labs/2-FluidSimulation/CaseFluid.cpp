@@ -23,18 +23,25 @@ namespace VCX::Labs::Fluid {
 
         Engine::Model makeBoxModel(float halfExtent) {
             Engine::SurfaceMesh mesh;
-            mesh.Positions = {
-                { -halfExtent, -halfExtent, -halfExtent }, { halfExtent, -halfExtent, -halfExtent }, { halfExtent, halfExtent, -halfExtent }, { -halfExtent, halfExtent, -halfExtent },
-                { -halfExtent, -halfExtent, halfExtent },  { halfExtent, -halfExtent, halfExtent },  { halfExtent, halfExtent, halfExtent },  { -halfExtent, halfExtent, halfExtent },
+
+            auto cornerNormal = [](glm::vec3 const & p) {
+                return glm::normalize(p);
             };
-            mesh.Indices = {
-                0, 1, 2, 0, 2, 3,
-                4, 6, 5, 4, 7, 6,
-                0, 4, 5, 0, 5, 1,
-                1, 5, 6, 1, 6, 2,
-                2, 6, 7, 2, 7, 3,
-                3, 7, 4, 3, 4, 0,
+
+            auto addFace = [&](glm::vec3 const & a, glm::vec3 const & b, glm::vec3 const & c, glm::vec3 const & d) {
+                std::uint32_t const base = static_cast<std::uint32_t>(mesh.Positions.size());
+                mesh.Positions.insert(mesh.Positions.end(), { a, b, c, d });
+                mesh.Normals.insert(mesh.Normals.end(), { cornerNormal(a), cornerNormal(b), cornerNormal(c), cornerNormal(d) });
+                mesh.Indices.insert(mesh.Indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
             };
+
+            addFace({ halfExtent, -halfExtent, -halfExtent }, { halfExtent, -halfExtent, halfExtent }, { halfExtent, halfExtent, halfExtent }, { halfExtent, halfExtent, -halfExtent });
+            addFace({ -halfExtent, -halfExtent, halfExtent }, { -halfExtent, -halfExtent, -halfExtent }, { -halfExtent, halfExtent, -halfExtent }, { -halfExtent, halfExtent, halfExtent });
+            addFace({ -halfExtent, halfExtent, -halfExtent }, { halfExtent, halfExtent, -halfExtent }, { halfExtent, halfExtent, halfExtent }, { -halfExtent, halfExtent, halfExtent });
+            addFace({ -halfExtent, -halfExtent, halfExtent }, { halfExtent, -halfExtent, halfExtent }, { halfExtent, -halfExtent, -halfExtent }, { -halfExtent, -halfExtent, -halfExtent });
+            addFace({ -halfExtent, -halfExtent, halfExtent }, { -halfExtent, halfExtent, halfExtent }, { halfExtent, halfExtent, halfExtent }, { halfExtent, -halfExtent, halfExtent });
+            addFace({ halfExtent, -halfExtent, -halfExtent }, { halfExtent, halfExtent, -halfExtent }, { -halfExtent, halfExtent, -halfExtent }, { -halfExtent, -halfExtent, -halfExtent });
+
             return Engine::Model { mesh, 0 };
         }
 
@@ -242,6 +249,7 @@ namespace VCX::Labs::Fluid {
         _simulation.setObstacle(_obstacleShape, _obstaclePos, glm::vec3(0.0f), _obstacleRadius, true);
         _simulation.transferVelocities(true, _flipRatio);
         _simulation.updateParticleDensity();
+        _simulation.updateParticleColors();
         UpdateSurfaceMesh();
         _stopped = true; // 初始静止
     }
