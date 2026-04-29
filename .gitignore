@@ -5,6 +5,7 @@ build
 .vscode
 .history
 .cache
+.claude/
 vsxmake*
 
 docs/html
