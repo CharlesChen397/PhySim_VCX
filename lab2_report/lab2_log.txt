@@ -1,0 +1,614 @@
+commit a5e34660594f8a0ed041a8410e081fdab3e0534c
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Wed Apr 29 14:22:37 2026 +0800
+
+    finish lab2 fluid mesh
+
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp      | 28 +++++++++++++++--------
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 15 ++++++++----
+ 2 files changed, 28 insertions(+), 15 deletions(-)
+
+commit 57b500861480e9527cfb769b8d08938717fc8360
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Sat Apr 25 18:58:57 2026 +0800
+
+    简陋的mesh
+
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp | 185 ++++++++++++++++++++++++++-
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.h   |   5 +
+ src/VCX/Labs/2-FluidSimulation/lab2-Flip.md  |   4 -
+ 3 files changed, 186 insertions(+), 8 deletions(-)
+
+commit 7c06478820bcd0cac0a8df55d1530a250dfdc10f
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Sat Apr 25 18:19:46 2026 +0800
+
+    cube交互
+
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp      | 140 ++++++++++++++++++++--
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.h        |   5 +
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp |  69 +++++++++--
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h   |  11 +-
+ 4 files changed, 201 insertions(+), 24 deletions(-)
+
+commit ffa49b164efed551e5e806cd1fa5056681bb5c80
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Sat Apr 25 17:54:17 2026 +0800
+
+    1
+
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp      |  57 +-
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.h        |   6 +
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 662 ++++++++++++++--------
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h   |  86 ++-
+ src/VCX/Labs/2-FluidSimulation/README.md          |   2 +-
+ 5 files changed, 535 insertions(+), 278 deletions(-)
+
+commit 79fb64ec126fb4fe940365a689375fb36c951c85
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Sat Apr 25 17:03:29 2026 +0800
+
+    1
+
+ .claude/settings.local.json                       |   7 +-
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp      |   2 +-
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp |  32 ++++++-
+ src/VCX/Labs/2-FluidSimulation/IMPLEMENTATION.md  | 104 ----------------------
+ 4 files changed, 38 insertions(+), 107 deletions(-)
+
+commit 32abb7819318f5f04cfdae01bdfdd2d0366ff64e
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 22:58:08 2026 +0800
+
+    lab2: 提高数值稳定性
+    
+    改进：
+    1. 添加速度限制(maxVelocity=10)防止速度爆炸
+    2. 降低漂移补偿系数(0.99->0.5)避免过度补偿
+    3. 调整overRelaxation(1.9->1.5)提高稳定性
+    4. 增加压力迭代(30->40)确保充分收敛
+    5. 重构压力求解逻辑，使用更清晰的实现
+    
+    这些改进应该能解决长时间运行后的波动和粒子跳起问题
+
+ .claude/settings.local.json                       |  4 +-
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 82 ++++++++++++++---------
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h   |  6 +-
+ 3 files changed, 56 insertions(+), 36 deletions(-)
+
+commit e0763556787b538330e749372c42c32754e43eea
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 22:05:42 2026 +0800
+
+    lab2: 优化性能参数以提高帧率
+    
+    修改：
+    - numParticleIters: 5 -> 2
+    - numPressureIters: 100 -> 30
+    
+    这些参数与参考实现一致，能显著提高帧率
+    100次压力迭代对于实时模拟来说太多了
+
+ .gitignore                                      | 1 +
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h | 8 ++++----
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+commit ca7bb9957b6580ba2324a6c760139aedc8d89024
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 21:57:20 2026 +0800
+
+    lab2: 根据参考代码修复关键实现问题
+    
+    关键修复：
+    1. 边界计算：使用 0.5f * m_h 而不是 m_h
+    2. 速度传递offset：offset[dir] -= m_h * 0.5f (减去而不是加上)
+    3. 密度更新offset：使用 0.5f + 0.5f * m_h
+    4. solveIncompressibility：速度更新使用 += d 而不是 -= p
+    5. 简化pushParticlesApart实现
+    
+    这些修复基于对答案代码的分析，应该能解决稳定性问题
+
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 577 +++++++---------------
+ 1 file changed, 174 insertions(+), 403 deletions(-)
+
+commit 51aadedf02665902d0d0bfd64288c4807d2a33a0
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 21:48:00 2026 +0800
+
+    lab2: 根据PPT调整压力求解参数
+    
+    修改：
+    1. overRelaxation: 1.0 -> 1.9 (使用PPT推荐值)
+    2. numPressureIters: 50 -> 100 (增加迭代次数)
+    3. 添加注释说明FLIP方法与纯Eulerian方法的区别
+    
+    根据PPT第493行，FLIP的散度公式不包含rho*h/dt系数
+    这与纯Eulerian方法(第258行)不同
+
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp  |  23 +-
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h    |   4 +-
+ src/VCX/Labs/2-FluidSimulation/ppt.md              | 845 +++++++++++++++++----
+ ...346\210\252\345\261\2172026-04-20 19.34.02.png" | Bin 162862 -> 0 bytes
+ 4 files changed, 732 insertions(+), 140 deletions(-)
+
+commit 098c892da9b96fd5b8f96403a815b85457a12ec0
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 21:39:39 2026 +0800
+
+    lab2: 调整压力求解参数以提高稳定性
+    
+    修改：
+    1. overRelaxation: 1.9 -> 1.0 (移除over-relaxation，提高稳定性)
+    2. numPressureIters: 30 -> 50 (增加迭代次数确保收敛)
+    3. 移除压力累积 (m_p[idx] += p)，每次迭代重新计算
+    
+    这些修改应该能提高模拟的稳定性，减少粒子乱飞的问题
+
+ .claude/settings.local.json                       |  5 ++++-
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 11 +++--------
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h   |  4 ++--
+ 3 files changed, 9 insertions(+), 11 deletions(-)
+
+commit 0f02c23c3e34fcb2fa303a8904a2451c2236e6a4
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 21:33:57 2026 +0800
+
+    lab2: 修复不可压缩求解和参数问题
+    
+    关键修复：
+    1. 修正overRelaxation参数：0.5 -> 1.9 (正确范围1-2)
+    2. 修正固体边界判断：使用邻居cell的s值而非当前cell
+    3. 优化索引计算：直接使用i*n+j*m+k避免函数调用
+    4. 修正速度更新：正确处理交错网格的速度存储位置
+    
+    这应该能解决速度爆炸的问题
+
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 37 ++++++++++++++---------
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h   |  2 +-
+ 2 files changed, 23 insertions(+), 16 deletions(-)
+
+commit 48f5826b12afbac15071c9d07341ab23d0acfc6e
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 19:38:36 2026 +0800
+
+    lab2: 修复坐标系统问题
+    
+    关键修复：
+    - 边界处理：添加-0.5偏移，适配[-0.5, 0.5]坐标系
+    - P2G速度传递：粒子坐标转换 pos0 = pos + 0.5
+    - G2P速度传递：粒子坐标转换 pos0 = pos + 0.5
+    - 粒子密度更新：粒子坐标转换 pos0 = pos + 0.5
+    
+    所有网格相关计算现在正确处理坐标系统偏移
+
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp  |  28 ++++++++++++++-------
+ ...346\210\252\345\261\2172026-04-20 19.13.49.png" | Bin 256701 -> 0 bytes
+ ...346\210\252\345\261\2172026-04-20 19.34.02.png" | Bin 0 -> 162862 bytes
+ 3 files changed, 19 insertions(+), 9 deletions(-)
+
+commit 61be8fc744b180b7e01fe9b66257d463c6b27dda
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 19:31:57 2026 +0800
+
+    lab2: 修复渲染和初始状态问题
+    
+    - 修复粒子渲染：使用正确的ModelObject构造函数
+    - 改为初始静止状态，点击Start后开始模拟
+    - _stopped初始值改为true
+
+ .claude/settings.local.json                            |  11 +++++++++++
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp           |   4 ++--
+ .../\346\210\252\345\261\2172026-04-20 19.13.49.png"   | Bin 0 -> 256701 bytes
+ 3 files changed, 13 insertions(+), 2 deletions(-)
+
+commit ea9d8a1cf77d873c67cf5d77ff67209131db6d80
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 19:12:53 2026 +0800
+
+    lab2: 添加实现说明文档
+
+ src/VCX/Labs/2-FluidSimulation/IMPLEMENTATION.md | 104 +++++++++++++++++++++++
+ 1 file changed, 104 insertions(+)
+
+commit 8baf6d9057173b64241cd71cb4747b4d75e6c707
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 20 19:10:26 2026 +0800
+
+    lab2: 实现FLIP流体仿真基础功能
+    
+    实现了以下核心功能：
+    - integrateParticles: 粒子积分，更新速度和位置
+    - handleParticleCollisions: 边界碰撞处理
+    - transferVelocities: P2G和G2P速度传递，支持PIC/FLIP混合
+    - solveIncompressibility: Gauss-Seidel迭代求解不可压缩性
+    - updateParticleDensity: 粒子密度更新，用于漂移补偿
+    - pushParticlesApart: 使用空间哈希表的粒子分离
+    - 完整的可视化界面和交互控制
+
+ src/VCX/Labs/2-FluidSimulation/App.cpp            |  13 +
+ src/VCX/Labs/2-FluidSimulation/App.h              |  24 ++
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.cpp      | 125 ++++++
+ src/VCX/Labs/2-FluidSimulation/CaseFluid.h        |  50 +++
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.cpp | 499 ++++++++++++++++++++++
+ src/VCX/Labs/2-FluidSimulation/README.md          |   4 +
+ src/VCX/Labs/2-FluidSimulation/lab2-Flip.md       | 122 ++++++
+ src/VCX/Labs/2-FluidSimulation/main.cpp           |  12 +-
+ src/VCX/Labs/2-FluidSimulation/ppt.md             | 350 +++++++++++++++
+ 9 files changed, 1197 insertions(+), 2 deletions(-)
+
+commit 3873e079644046e31baade05fb1227ab80ee9524
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Thu Apr 9 22:22:39 2026 +0800
+
+    lab1 final
+
+ .gitignore                  |   2 +-
+ lab1_report/demo1.mp4       | Bin 4470240 -> 5693646 bytes
+ lab1_report/demo1.webm      | Bin 13443454 -> 16249959 bytes
+ lab1_report/lab1_log.txt    | 317 ++++----------------------------------------
+ lab1_report/lab1_report.pdf | Bin 199683 -> 241455 bytes
+ lab1_report/lab1_report.tex |  46 +++----
+ 6 files changed, 41 insertions(+), 324 deletions(-)
+
+commit bbd247e41ce363419aa6c09cd4c6bffa6f649326
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Thu Apr 9 22:15:24 2026 +0800
+
+    lab1 done
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  |  55 +++++----
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 177 ++++++++++++++++++++-------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   |   2 +
+ 3 files changed, 166 insertions(+), 68 deletions(-)
+
+commit 34a69a2acc70d8d798882e7fa0d5a2d0cb7df343
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Thu Apr 9 20:02:18 2026 +0800
+
+    1
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 40 ++++++++++++++---------------
+ 1 file changed, 20 insertions(+), 20 deletions(-)
+
+commit cb108812017d6330408ee5f4f8706878a8471879
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Thu Apr 9 19:55:37 2026 +0800
+
+    lab1: make base face-face case head-on collision
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+commit 87c80f7ab9dab95a34f6ab498301d98d35fac3b0
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Thu Apr 9 19:44:56 2026 +0800
+
+    1
+
+ .gitignore             |   3 +--
+ lab1_report/demo1.mp4  | Bin 0 -> 4470240 bytes
+ lab1_report/demo1.webm | Bin 0 -> 13443454 bytes
+ 3 files changed, 1 insertion(+), 2 deletions(-)
+
+commit 21dbe91e23ea3bc8de362f284315dc69debf05f0
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Thu Apr 9 19:43:43 2026 +0800
+
+    1
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 71 ++++++++++++++---------------
+ src/VCX/Labs/1-RigidBody/CasePlayground.h   |  4 --
+ xmake.sh                                    |  5 ++
+ 3 files changed, 39 insertions(+), 41 deletions(-)
+
+commit 56a0011b3ff85327072fa3f5cc6d06cf266c91a9
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Mon Apr 6 21:23:19 2026 +0800
+
+    chore: move Lab1 report and PDF into lab1_report/; refresh git log; ignore LaTeX aux and demo videos.
+    
+    Made-with: Cursor
+
+ .gitignore                               |  16 +++
+ lab1_report.pdf                          | Bin 206894 -> 0 bytes
+ lab1_report.tex                          |  81 -----------
+ lab1_log.txt => lab1_report/lab1_log.txt |  11 ++
+ lab1_report/lab1_report.pdf              | Bin 0 -> 199683 bytes
+ lab1_report/lab1_report.tex              | 225 +++++++++++++++++++++++++++++++
+ 6 files changed, 252 insertions(+), 81 deletions(-)
+
+commit 2f355c5c4f8a741804c5c6073a4e3a775897861d
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Mon Apr 6 20:37:08 2026 +0800
+
+    docs: refresh lab1_log.txt after report PDF commit.
+    
+    Made-with: Cursor
+
+ lab1_log.txt | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+commit d63089776b4b6de3a58537efa3b7783b8f1f475d
+Author: 陈羿桥 <charleschen397@gmail.com>
+Date:   Mon Apr 6 20:37:02 2026 +0800
+
+    docs: fill lab1 report author info and add compiled PDF (学号 2400012935).
+    
+    Made-with: Cursor
+
+ lab1_report.pdf | Bin 0 -> 206894 bytes
+ lab1_report.tex |   8 ++++++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+commit e3dd3f0f12596b70e16b950d933db4ced32e1b9c
+Author: Lab1 Student <lab1@phyisim.local>
+Date:   Mon Apr 6 20:29:34 2026 +0800
+
+    docs: add lab1_log.txt (git log --stat) for course submission packaging.
+    
+    Made-with: Cursor
+
+ lab1_log.txt | 261 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 261 insertions(+)
+
+commit 27bdafb017f431639ac103f520bff054f7410801
+Author: Lab1 Student <lab1@phyisim.local>
+Date:   Mon Apr 6 20:29:27 2026 +0800
+
+    Lab1 rigid body: FCL, sequential and Schur contact solves, CCD, penetration relax, presets and UI.
+    
+    - Integrate translation and quaternion with Euler gyroscopic term per course notes.
+    - FCL box/sphere/cylinder detection; impulse iteration with Baumgarte and friction.
+    - Optional Schur LDLT path with resting bias scaling and impulse caps for B4.
+    - Pre-step overlap relaxation and capped position correction to avoid pops.
+    - CasePlayground scenarios (base demos and bonuses), streamlined props panel.
+    - Add lab1_report.tex for submission write-up.
+    
+    Made-with: Cursor
+
+ README.md                                    |  10 +-
+ lab1_report.tex                              |  77 ++++++++++++
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  | 178 ++++++++++++++-------------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 105 +++++++++++++---
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   |  13 ++
+ xmake.lua                                    |   2 +
+ 6 files changed, 281 insertions(+), 104 deletions(-)
+
+commit 19df43aa7cd9000611106a982ed3fdd90ff965ef
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Mon Apr 6 16:40:27 2026 +0800
+
+    保存mac当前进展
+
+ .gitignore                                 |   1 +
+ src/VCX/Labs/1-RigidBody/lab1-RigidBody.md | 127 +++++++++++++++++++++++++++++
+ 2 files changed, 128 insertions(+)
+
+commit 935314c41a72509943fa837c159d12af278d7fab
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 23:45:04 2026 +0800
+
+    lab1: fix floor tunneling by normal orientation guard
+
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+commit 6186814aa44157739bddcd92618055971636c1d5
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 23:35:49 2026 +0800
+
+    lab1: stabilize B2/B3 rebounds and lower complex friction
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  | 111 ++++++++++++++++++---------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp |  27 ++++---
+ 2 files changed, 93 insertions(+), 45 deletions(-)
+
+commit e1ad06acafd74e8e7756093079bf02f0899c3495
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 23:23:04 2026 +0800
+
+    lab1: stabilize contacts and fix B2 startup blow-up
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  | 51 +++++++++++++++++--------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 57 +++++++++++++++++-----------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   |  1 +
+ 3 files changed, 72 insertions(+), 37 deletions(-)
+
+commit 4fcab271e71500b048635ea7bea54f44505bbe3e
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 23:05:26 2026 +0800
+
+    lab1: make B1 impulse arrow visible on start
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 74 ++++++++++++++++++-----------
+ src/VCX/Labs/1-RigidBody/CasePlayground.h   |  3 ++
+ 2 files changed, 50 insertions(+), 27 deletions(-)
+
+commit a6de55707df45d2874ffe086bc917b88004b6ea5
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 22:58:53 2026 +0800
+
+    lab1: visualize user-applied impulse with debug arrow
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 113 +++++++++++++++++++++++++---
+ src/VCX/Labs/1-RigidBody/CasePlayground.h   |  10 +++
+ 2 files changed, 113 insertions(+), 10 deletions(-)
+
+commit 23fba282996a712aa4a02c020774c8b97e687f3c
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 22:55:01 2026 +0800
+
+    lab1: stabilize and slow B1 momentum transfer
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 55 ++++++++++++++++++++++-------
+ src/VCX/Labs/1-RigidBody/CasePlayground.h   |  2 ++
+ 2 files changed, 44 insertions(+), 13 deletions(-)
+
+commit 357078571b227b186624b939708d62fbf48ff1a6
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 22:13:12 2026 +0800
+
+    lab1: pause presets by default and stabilize resting contacts
+
+ src/VCX/Labs/1-RigidBody/App.cpp             |   4 +-
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  |  42 ++++++----
+ src/VCX/Labs/1-RigidBody/CasePlayground.h    |   2 +-
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 110 ++++++++++++++++++---------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   |   5 +-
+ 5 files changed, 108 insertions(+), 55 deletions(-)
+
+commit 0263ee05e815c4baba1589a32034b6c5d545b3b4
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 22:01:19 2026 +0800
+
+    lab1: add full velocity controls and reduce resting jitter
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  | 57 ++++++++++++++-------
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 75 ++++++++++++++++++++++++----
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   |  4 ++
+ 3 files changed, 109 insertions(+), 27 deletions(-)
+
+commit 7757f9daea85b4c1d9bbee01f52d78c0f9659f6f
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 21:29:34 2026 +0800
+
+    lab1: tidy mesh buffer declarations
+
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+commit 840675668c6c2d24e9300e53599267af48f5cbc1
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 21:29:17 2026 +0800
+
+    lab1: solve contacts and joints together in Schur mode
+
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 111 +++++++++++++++++++--------
+ 1 file changed, 77 insertions(+), 34 deletions(-)
+
+commit c094cbdfc21d3288f7d03908878bef64bb2ba1dc
+Author: CharlesChen397 <charleschen397@gmail.com>
+Date:   Tue Mar 31 21:27:03 2026 +0800
+
+    lab1: implement rigid body playground with collision, constraints, and presets
+
+ src/VCX/Labs/1-RigidBody/App.cpp             |  13 +
+ src/VCX/Labs/1-RigidBody/App.h               |  24 ++
+ src/VCX/Labs/1-RigidBody/CasePlayground.cpp  | 385 ++++++++++++++++++++
+ src/VCX/Labs/1-RigidBody/CasePlayground.h    |  90 +++++
+ src/VCX/Labs/1-RigidBody/PrimitiveMesh.cpp   | 174 +++++++++
+ src/VCX/Labs/1-RigidBody/PrimitiveMesh.h     |  20 +
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.cpp | 524 +++++++++++++++++++++++++++
+ src/VCX/Labs/1-RigidBody/RigidBodySystem.h   | 113 ++++++
+ src/VCX/Labs/1-RigidBody/main.cpp            |  12 +-
+ 9 files changed, 1353 insertions(+), 2 deletions(-)
+
+commit 583190cce1cb7df96ef21fe2a2474af2d2d56809
+Author: RachelChu <mchu@pku.edu.cn>
+Date:   Tue Mar 3 11:36:28 2026 +0800
+
+    code base
+
+ .clang-format                                    | 152 ++++
+ .gitignore                                       |  11 +
+ LICENSE                                          |  21 +
+ README.md                                        | 176 +++++
+ assets/fonts/Ubuntu.ttf                          | Bin 0 -> 279384 bytes
+ assets/fonts/UbuntuMono.ttf                      | Bin 0 -> 205748 bytes
+ assets/images/ground.jpg                         | Bin 0 -> 339354 bytes
+ assets/images/lab0-case1.png                     | Bin 0 -> 42293 bytes
+ assets/images/lab0-case2.png                     | Bin 0 -> 58986 bytes
+ assets/images/lab0-case3.png                     | Bin 0 -> 144187 bytes
+ assets/images/lab0-case4.png                     | Bin 0 -> 110155 bytes
+ assets/images/lab0-case5.png                     | Bin 0 -> 193874 bytes
+ assets/images/vcl-logo-16x16.png                 | Bin 0 -> 1985 bytes
+ assets/images/vcl-logo-256x256.png               | Bin 0 -> 4533 bytes
+ assets/images/vcl-logo-32x32.png                 | Bin 0 -> 2203 bytes
+ assets/images/vcl-logo-48x48.png                 | Bin 0 -> 2439 bytes
+ assets/scenes/fluid/fluid.yaml                   |  21 +
+ assets/shaders/flat.frag                         |  11 +
+ assets/shaders/flat.vert                         |  14 +
+ assets/shaders/fluid.frag                        |  77 ++
+ assets/shaders/fluid.vert                        |  36 +
+ assets/shaders/phong.frag                        |  92 +++
+ assets/shaders/sphere_phong.vert                 |  36 +
+ assets/shaders/triangle.frag                     |   9 +
+ assets/shaders/triangle.vert                     |  11 +
+ lab0-GettingStarted.md                           | 107 +++
+ src/3rdparty/imgui_impl_glfw.cpp                 | 663 +++++++++++++++++
+ src/3rdparty/imgui_impl_glfw.h                   |  46 ++
+ src/3rdparty/imgui_impl_opengl3.cpp              | 871 +++++++++++++++++++++++
+ src/3rdparty/imgui_impl_opengl3.h                |  55 ++
+ src/3rdparty/imgui_impl_opengl3_loader.h         | 786 ++++++++++++++++++++
+ src/3rdparty/scope.hpp                           | 574 +++++++++++++++
+ src/3rdparty/stb_image.cpp                       |   4 +
+ src/3rdparty/tiny_obj_loader.cpp                 |   4 +
+ src/VCX/Assets/bundled.h                         |  29 +
+ src/VCX/Engine/Async.hpp                         |  67 ++
+ src/VCX/Engine/Camera.hpp                        |  31 +
+ src/VCX/Engine/Formats.hpp                       | 136 ++++
+ src/VCX/Engine/GL/Frame.hpp                      | 178 +++++
+ src/VCX/Engine/GL/Program.cpp                    |  37 +
+ src/VCX/Engine/GL/Program.h                      |  36 +
+ src/VCX/Engine/GL/RenderItem.cpp                 |  70 ++
+ src/VCX/Engine/GL/RenderItem.h                   |  68 ++
+ src/VCX/Engine/GL/Sampler.hpp                    |  59 ++
+ src/VCX/Engine/GL/Shader.cpp                     |  57 ++
+ src/VCX/Engine/GL/Shader.h                       |  29 +
+ src/VCX/Engine/GL/Texture.hpp                    | 187 +++++
+ src/VCX/Engine/GL/UniformBlock.hpp               |  32 +
+ src/VCX/Engine/GL/VertexLayout.hpp               | 104 +++
+ src/VCX/Engine/GL/resource.hpp                   | 190 +++++
+ src/VCX/Engine/GL/uniform.hpp                    | 137 ++++
+ src/VCX/Engine/Scene.cpp                         |  14 +
+ src/VCX/Engine/Scene.h                           |  82 +++
+ src/VCX/Engine/Sphere.cpp                        |  54 ++
+ src/VCX/Engine/Sphere.h                          |  26 +
+ src/VCX/Engine/SurfaceMesh.cpp                   |  83 +++
+ src/VCX/Engine/SurfaceMesh.h                     |  40 ++
+ src/VCX/Engine/TextureND.hpp                     | 121 ++++
+ src/VCX/Engine/app.cpp                           | 212 ++++++
+ src/VCX/Engine/app.h                             |  69 ++
+ src/VCX/Engine/loader.cpp                        | 442 ++++++++++++
+ src/VCX/Engine/loader.h                          |  21 +
+ src/VCX/Engine/math.hpp                          |  30 +
+ src/VCX/Engine/prelude.hpp                       |  30 +
+ src/VCX/Engine/type.hpp                          |  41 ++
+ src/VCX/Examples/ImGui/main.cpp                  |  35 +
+ src/VCX/Examples/Triangle/main.cpp               |  72 ++
+ src/VCX/Labs/0-GettingStarted/App.cpp            |  14 +
+ src/VCX/Labs/0-GettingStarted/App.h              |  33 +
+ src/VCX/Labs/0-GettingStarted/CaseBox.cpp        | 103 +++
+ src/VCX/Labs/0-GettingStarted/CaseBox.h          |  35 +
+ src/VCX/Labs/0-GettingStarted/CaseFixed.cpp      |  85 +++
+ src/VCX/Labs/0-GettingStarted/CaseFixed.h        |  29 +
+ src/VCX/Labs/0-GettingStarted/CaseFluid.cpp      | 140 ++++
+ src/VCX/Labs/0-GettingStarted/CaseFluid.h        |  59 ++
+ src/VCX/Labs/0-GettingStarted/CaseMassSpring.cpp | 104 +++
+ src/VCX/Labs/0-GettingStarted/CaseMassSpring.h   |  40 ++
+ src/VCX/Labs/0-GettingStarted/CaseResizable.cpp  |  55 ++
+ src/VCX/Labs/0-GettingStarted/CaseResizable.h    |  28 +
+ src/VCX/Labs/0-GettingStarted/FluidSimulator.h   |  25 +
+ src/VCX/Labs/0-GettingStarted/MassSpringSystem.h | 110 +++
+ src/VCX/Labs/0-GettingStarted/main.cpp           |  13 +
+ src/VCX/Labs/1-RigidBody/main.cpp                |   5 +
+ src/VCX/Labs/2-FluidSimulation/FluidSimulator.h  | 169 +++++
+ src/VCX/Labs/2-FluidSimulation/main.cpp          |   5 +
+ src/VCX/Labs/3-FEM/main.cpp                      |   5 +
+ src/VCX/Labs/Common/FlyCameraManager.cpp         | 131 ++++
+ src/VCX/Labs/Common/FlyCameraManager.h           |  66 ++
+ src/VCX/Labs/Common/ICase.h                      |  29 +
+ src/VCX/Labs/Common/ImGuiHelper.cpp              |  76 ++
+ src/VCX/Labs/Common/ImGuiHelper.h                |  26 +
+ src/VCX/Labs/Common/ImageRGB.cpp                 |  42 ++
+ src/VCX/Labs/Common/ImageRGB.h                   |  13 +
+ src/VCX/Labs/Common/OrbitCameraManager.cpp       | 193 +++++
+ src/VCX/Labs/Common/OrbitCameraManager.h         |  74 ++
+ src/VCX/Labs/Common/UI.cpp                       | 326 +++++++++
+ src/VCX/Labs/Common/UI.h                         |  68 ++
+ src/VCX/Labs/Scene/Content.cpp                   |  76 ++
+ src/VCX/Labs/Scene/Content.h                     |  12 +
+ src/VCX/Labs/Scene/SceneObject.cpp               | 157 ++++
+ src/VCX/Labs/Scene/SceneObject.h                 |  77 ++
+ xmake.lua                                        | 140 ++++
+ 102 files changed, 9159 insertions(+)
