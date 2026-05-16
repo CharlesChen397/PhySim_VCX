@@ -9,6 +9,14 @@
 
 namespace VCX::Labs::FEM {
 
+    enum class MaterialModel : int {
+        StVK = 0,
+        NeoHookean = 1,
+        Corotated = 2,
+    };
+
+    char const * MaterialModelName(MaterialModel model);
+
     class FEMSystem {
     public:
         struct Tet {
@@ -29,6 +37,7 @@ namespace VCX::Labs::FEM {
         float Gravity { 0.05f };
         float VelocityDamping { 1.2f };
         float MaxVelocity { 25.f };
+        MaterialModel Model { MaterialModel::StVK };
 
         std::vector<glm::vec3> Positions;
         std::vector<glm::vec3> RestPositions;
@@ -41,7 +50,7 @@ namespace VCX::Labs::FEM {
         std::vector<std::uint32_t> SurfaceTriangles;
         std::vector<std::uint32_t> SurfaceLines;
 
-        void ResetBlock(GridResolution resolution, glm::vec3 size);
+        void ResetBlock(GridResolution resolution, glm::vec3 size, glm::vec3 offset = glm::vec3(0.f));
         void RecomputeMasses();
         void Step(float dt, std::size_t controlParticle, glm::vec3 const & controlForce);
 

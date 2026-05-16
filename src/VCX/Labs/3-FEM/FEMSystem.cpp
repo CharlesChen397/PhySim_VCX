@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <Eigen/Dense>
 
 namespace VCX::Labs::FEM {
 
@@ -49,12 +50,66 @@ namespace VCX::Labs::FEM {
             return m[0][0] + m[1][1] + m[2][2];
         }
 
-        glm::vec3 safeNormalize(glm::vec3 const & v) {
-            float const len2 = length2(v);
-            if (len2 <= 1e-20f) return glm::vec3(0.f);
-            return v * (1.f / std::sqrt(len2));
+        Eigen::Matrix3f glm2eigen(glm::mat3 const & m) {
+            Eigen::Matrix3f r;
+            for (int c = 0; c < 3; ++c) {
+                for (int row = 0; row < 3; ++row) {
+                    r(row, c) = m[c][row];
+                }
+            }
+            return r;
+        }
+
+        glm::mat3 eigen2glm(Eigen::Matrix3f const & m) {
+            glm::mat3 r(0.f);
+            for (int c = 0; c < 3; ++c) {
+                for (int row = 0; row < 3; ++row) {
+                    r[c][row] = m(row, c);
+                }
+            }
+            return r;
+        }
+
+        glm::mat3 polarRotation(glm::mat3 const & F) {
+            Eigen::JacobiSVD<Eigen::Matrix3f> svd(glm2eigen(F), Eigen::ComputeFullU | Eigen::ComputeFullV);
+            Eigen::Matrix3f U = svd.matrixU();
+            Eigen::Matrix3f V = svd.matrixV();
+            Eigen::Matrix3f R = U * V.transpose();
+            if (R.determinant() < 0.f) {
+                U.col(2) *= -1.f;
+                R = U * V.transpose();
+            }
+            return eigen2glm(R);
+        }
+
+        glm::mat3 firstPiola(glm::mat3 const & F, MaterialModel model, float lambda, float mu) {
+            if (model == MaterialModel::NeoHookean) {
+                float const J = std::max(glm::determinant(F), 1e-4f);
+                glm::mat3 const FinvT = glm::transpose(glm::inverse(F));
+                return mu * (F - FinvT) + lambda * std::log(J) * FinvT;
+            }
+
+            if (model == MaterialModel::Corotated) {
+                glm::mat3 const R = polarRotation(F);
+                float const J = glm::determinant(F);
+                return 2.f * mu * (F - R) + lambda * (J - 1.f) * J * glm::transpose(glm::inverse(F));
+            }
+
+            glm::mat3 const C = glm::transpose(F) * F;
+            glm::mat3 const G = 0.5f * (C - glm::mat3(1.f));
+            glm::mat3 const S = 2.f * mu * G + lambda * traceMat(G) * glm::mat3(1.f);
+            return F * S;
         }
     } // namespace
+
+    char const * MaterialModelName(MaterialModel model) {
+        switch (model) {
+        case MaterialModel::StVK: return "StVK";
+        case MaterialModel::NeoHookean: return "Neo-Hookean";
+        case MaterialModel::Corotated: return "Corotated";
+        }
+        return "Unknown";
+    }
 
     std::size_t FEMSystem::GetID(std::size_t i, std::size_t j, std::size_t k) const {
         return i * (_resolution.Y + 1) * (_resolution.Z + 1) + j * (_resolution.Z + 1) + k;
@@ -163,7 +218,7 @@ namespace VCX::Labs::FEM {
         }
     }
 
-    void FEMSystem::ResetBlock(GridResolution resolution, glm::vec3 size) {
+    void FEMSystem::ResetBlock(GridResolution resolution, glm::vec3 size, glm::vec3 offset) {
         _resolution = resolution;
 
         Positions.clear();
@@ -186,7 +241,7 @@ namespace VCX::Labs::FEM {
         for (std::size_t i = 0; i <= _resolution.X; ++i) {
             for (std::size_t j = 0; j <= _resolution.Y; ++j) {
                 for (std::size_t k = 0; k <= _resolution.Z; ++k) {
-                    glm::vec3 const p = origin + glm::vec3(float(i) * delta.x, float(j) * delta.y, float(k) * delta.z);
+                    glm::vec3 const p = offset + origin + glm::vec3(float(i) * delta.x, float(j) * delta.y, float(k) * delta.z);
                     bool const fixed = i == 0;
                     AddParticle(p, fixed);
                 }
@@ -253,10 +308,7 @@ namespace VCX::Labs::FEM {
                 Positions[i2] - Positions[i0],
                 Positions[i3] - Positions[i0]);
             glm::mat3 const F = Ds * tet.InvRest;
-            glm::mat3 const C = glm::transpose(F) * F;
-            glm::mat3 const G = 0.5f * (C - glm::mat3(1.f));
-            glm::mat3 const S = 2.f * mu * G + lambda * traceMat(G) * glm::mat3(1.f);
-            glm::mat3 const P = F * S;
+            glm::mat3 const P = firstPiola(F, Model, lambda, mu);
             glm::mat3 const H = -tet.RestVolume * P * glm::transpose(tet.InvRest);
 
             Forces[i1] += col(H, 0);

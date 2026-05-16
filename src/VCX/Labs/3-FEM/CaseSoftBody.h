@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <string_view>
 #include <vector>
 
@@ -36,17 +37,19 @@ namespace VCX::Labs::FEM {
         Engine::Camera             _camera { .Eye = glm::vec3(-7.f, 3.5f, 6.f), .Target = glm::vec3(0.f, 0.f, 0.f) };
         Common::OrbitCameraManager _cameraManager;
 
-        FEMSystem                 _system;
+        std::array<FEMSystem, 3>  _systems;
         FEMSystem::GridResolution _resolution { 8, 2, 2 };
         glm::vec3                 _size { 8.f, 2.f, 2.f };
 
-        bool  _stopped { false };
+        bool  _stopped { true };
+        bool  _compareMaterials { true };
         bool  _showSurface { true };
-        bool  _showWireframe { true };
+        bool  _showWireframe { false };
         bool  _showParticles { false };
         bool  _showFixed { true };
         float _timeStep { 0.001f };
         int   _stepsPerFrame { 8 };
+        int   _activeModel { 0 };
 
         std::size_t _selectedParticle { 0 };
         float       _controlForceMagnitude { 600.f };
@@ -58,6 +61,10 @@ namespace VCX::Labs::FEM {
         std::vector<glm::vec3> _fixedPositions;
         std::vector<glm::vec3> _selectedPosition;
         std::vector<glm::vec3> _forceLine;
+
+        std::vector<glm::vec3>     _renderPositions;
+        std::vector<std::uint32_t> _renderTriangles;
+        std::vector<std::uint32_t> _renderLines;
 
         void ResetSystem();
         void UpdateStaticBuffers();
