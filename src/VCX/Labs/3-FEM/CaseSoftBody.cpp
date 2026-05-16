@@ -111,7 +111,7 @@ namespace VCX::Labs::FEM {
         forceButton("-Z", glm::vec3(0.f, 0.f, -1.f));
 
         ImGui::Text("Hotkeys: J/L X, U/O Y, I/K Z");
-        ImGui::Text("Alt + Left Drag: pull selected vertex in view plane");
+        ImGui::Text("Z + Left Drag: pull selected vertex in view plane");
 
         if (_selectedParticle < _system.Positions.size()) {
             glm::vec3 const p = _system.Positions[_selectedParticle];
@@ -220,7 +220,7 @@ namespace VCX::Labs::FEM {
             if (ImGui::IsKeyDown(ImGuiKey_K)) _keyboardForce.z += _controlForceMagnitude;
         }
 
-        bool const dragging = hovered && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left) && (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f);
+        bool const dragging = hovered && ImGui::IsKeyDown(ImGuiKey_Z) && ImGui::IsMouseDown(ImGuiMouseButton_Left) && (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f);
         if (dragging) {
             auto const * window = ImGui::GetCurrentWindow();
             glm::vec3 const front = glm::normalize(_camera.Target - _camera.Eye);
