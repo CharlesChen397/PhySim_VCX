@@ -50,40 +50,19 @@ namespace VCX::Labs::FEM {
 
         ImGui::Separator();
         ImGui::Text("Explicit FEM");
-        if (ImGui::Checkbox("Bonus1: compare 3 materials", &_compareMaterials)) {
-            UpdateStaticBuffers();
-        }
-        if (!_compareMaterials) {
-            char const * names[] = { "StVK", "Neo-Hookean", "Corotated" };
-            if (ImGui::Combo("Material Model", &_activeModel, names, 3)) {
-                _systems[0].Model = static_cast<MaterialModel>(_activeModel);
-            }
-        } else {
-            ImGui::Text("Left/Mid/Right: StVK, Neo-Hookean, Corotated");
+        char const * names[] = { "StVK", "Neo-Hookean", "Corotated" };
+        if (ImGui::Combo("Material Model", &_activeModel, names, 3)) {
+            _system.Model = static_cast<MaterialModel>(_activeModel);
         }
         ImGui::SliderFloat("Time Step", &_timeStep, 0.0002f, 0.003f, "%.4f");
         ImGui::SliderInt("Steps / Frame", &_stepsPerFrame, 1, 32);
-        for (auto & system : _systems) {
-            system.Model = _compareMaterials ? system.Model : static_cast<MaterialModel>(_activeModel);
+        ImGui::SliderFloat("Young Modulus", &_system.YoungModulus, 1000.f, 80000.f, "%.0f");
+        ImGui::SliderFloat("Poisson Ratio", &_system.PoissonRatio, 0.0f, 0.45f, "%.2f");
+        if (ImGui::SliderFloat("Density", &_system.Density, 50.f, 1000.f, "%.0f")) {
+            _system.RecomputeMasses();
         }
-        if (ImGui::SliderFloat("Young Modulus", &_systems[0].YoungModulus, 1000.f, 80000.f, "%.0f")) {
-            for (auto & system : _systems) system.YoungModulus = _systems[0].YoungModulus;
-        }
-        if (ImGui::SliderFloat("Poisson Ratio", &_systems[0].PoissonRatio, 0.0f, 0.45f, "%.2f")) {
-            for (auto & system : _systems) system.PoissonRatio = _systems[0].PoissonRatio;
-        }
-        if (ImGui::SliderFloat("Density", &_systems[0].Density, 50.f, 1000.f, "%.0f")) {
-            for (auto & system : _systems) {
-                system.Density = _systems[0].Density;
-                system.RecomputeMasses();
-            }
-        }
-        if (ImGui::SliderFloat("Gravity", &_systems[0].Gravity, 0.f, 9.8f, "%.3f")) {
-            for (auto & system : _systems) system.Gravity = _systems[0].Gravity;
-        }
-        if (ImGui::SliderFloat("Velocity Damping", &_systems[0].VelocityDamping, 0.f, 8.f, "%.2f")) {
-            for (auto & system : _systems) system.VelocityDamping = _systems[0].VelocityDamping;
-        }
+        ImGui::SliderFloat("Gravity", &_system.Gravity, 0.f, 9.8f, "%.3f");
+        ImGui::SliderFloat("Velocity Damping", &_system.VelocityDamping, 0.f, 8.f, "%.2f");
 
         ImGui::Separator();
         ImGui::Text("Mesh");
@@ -105,7 +84,7 @@ namespace VCX::Labs::FEM {
 
         ImGui::Separator();
         ImGui::Text("Interaction");
-        int maxParticle = std::max(0, static_cast<int>(_systems[0].Positions.size()) - 1);
+        int maxParticle = std::max(0, static_cast<int>(_system.Positions.size()) - 1);
         int selected = static_cast<int>(std::min<std::size_t>(_selectedParticle, std::size_t(maxParticle)));
         if (ImGui::SliderInt("Control Particle", &selected, 0, maxParticle)) {
             _selectedParticle = static_cast<std::size_t>(selected);
@@ -134,8 +113,8 @@ namespace VCX::Labs::FEM {
         ImGui::Text("Hotkeys: J/L X, U/O Y, I/K Z");
         ImGui::Text("Alt + Left Drag: pull selected vertex in view plane");
 
-        if (_selectedParticle < _systems[0].Positions.size()) {
-            glm::vec3 const p = _systems[0].Positions[_selectedParticle];
+        if (_selectedParticle < _system.Positions.size()) {
+            glm::vec3 const p = _system.Positions[_selectedParticle];
             ImGui::Text("Selected: %zu  (%.2f, %.2f, %.2f)", _selectedParticle, p.x, p.y, p.z);
         }
 
@@ -152,10 +131,7 @@ namespace VCX::Labs::FEM {
         if (!_stopped) {
             int const steps = std::max(1, _stepsPerFrame);
             for (int i = 0; i < steps; ++i) {
-                int const count = _compareMaterials ? 3 : 1;
-                for (int s = 0; s < count; ++s) {
-                    _systems[s].Step(_timeStep, _selectedParticle, frameControlForce);
-                }
+                _system.Step(_timeStep, _selectedParticle, frameControlForce);
             }
         }
         _buttonForce = glm::vec3(0.f);
@@ -266,65 +242,43 @@ namespace VCX::Labs::FEM {
     }
 
     void CaseSoftBody::ResetSystem() {
-        _stopped        = true;
-        glm::vec3 const offsets[3] = {
-            glm::vec3(-_size.x * 0.75f - 1.0f, 0.f, 0.f),
-            glm::vec3(0.f),
-            glm::vec3(_size.x * 0.75f + 1.0f, 0.f, 0.f),
-        };
-        bool const firstReset = _systems[0].Positions.empty();
-        float const young = firstReset ? 20000.f : _systems[0].YoungModulus;
-        float const poisson = firstReset ? 0.2f : _systems[0].PoissonRatio;
-        float const density = firstReset ? 400.f : _systems[0].Density;
-        float const gravity = firstReset ? 0.05f : _systems[0].Gravity;
-        float const damping = firstReset ? 1.2f : _systems[0].VelocityDamping;
+        _stopped               = true;
+        bool const firstReset  = _system.Positions.empty();
+        float const young      = firstReset ? 20000.f : _system.YoungModulus;
+        float const poisson    = firstReset ? 0.2f : _system.PoissonRatio;
+        float const density    = firstReset ? 400.f : _system.Density;
+        float const gravity    = firstReset ? 0.05f : _system.Gravity;
+        float const damping    = firstReset ? 1.2f : _system.VelocityDamping;
+        auto const  model      = firstReset ? MaterialModel::StVK : _system.Model;
 
-        for (int i = 0; i < 3; ++i) {
-            _systems[i].YoungModulus = young;
-            _systems[i].PoissonRatio = poisson;
-            _systems[i].Density = density;
-            _systems[i].Gravity = gravity;
-            _systems[i].VelocityDamping = damping;
-            _systems[i].Model = static_cast<MaterialModel>(i);
-            _systems[i].ResetBlock(_resolution, _size, offsets[i]);
-        }
-        _activeModel = 0;
+        _system.YoungModulus   = young;
+        _system.PoissonRatio   = poisson;
+        _system.Density        = density;
+        _system.Gravity        = gravity;
+        _system.VelocityDamping = damping;
+        _system.Model          = model;
+        _activeModel           = static_cast<int>(model);
+        _system.ResetBlock(_resolution, _size);
         SetSelectedToFreeEnd();
         UpdateStaticBuffers();
     }
 
     void CaseSoftBody::UpdateStaticBuffers() {
-        _renderTriangles.clear();
-        _renderLines.clear();
-        std::uint32_t base = 0;
-        int const count = _compareMaterials ? 3 : 1;
-        for (int s = 0; s < count; ++s) {
-            for (auto idx : _systems[s].SurfaceTriangles) _renderTriangles.push_back(base + idx);
-            for (auto idx : _systems[s].SurfaceLines) _renderLines.push_back(base + idx);
-            base += static_cast<std::uint32_t>(_systems[s].Positions.size());
-        }
-        _solidItem.UpdateElementBuffer(_renderTriangles);
-        _wireItem.UpdateElementBuffer(_renderLines);
+        _solidItem.UpdateElementBuffer(_system.SurfaceTriangles);
+        _wireItem.UpdateElementBuffer(_system.SurfaceLines);
     }
 
     void CaseSoftBody::UpdateDynamicBuffers(glm::vec3 const & frameControlForce) {
-        _renderPositions.clear();
-        int const count = _compareMaterials ? 3 : 1;
-        for (int s = 0; s < count; ++s) {
-            _renderPositions.insert(_renderPositions.end(), _systems[s].Positions.begin(), _systems[s].Positions.end());
-        }
-        if (!_renderPositions.empty()) {
-            _solidItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_renderPositions));
-            _wireItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_renderPositions));
-            _particleItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_renderPositions));
+        if (!_system.Positions.empty()) {
+            _solidItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_system.Positions));
+            _wireItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_system.Positions));
+            _particleItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_system.Positions));
         }
 
         _fixedPositions.clear();
-        for (int s = 0; s < count; ++s) {
-            for (std::size_t i = 0; i < _systems[s].Positions.size(); ++i) {
-                if (_systems[s].Fixed[i]) {
-                    _fixedPositions.push_back(_systems[s].Positions[i]);
-                }
+        for (std::size_t i = 0; i < _system.Positions.size(); ++i) {
+            if (_system.Fixed[i]) {
+                _fixedPositions.push_back(_system.Positions[i]);
             }
         }
         if (!_fixedPositions.empty()) {
@@ -333,21 +287,17 @@ namespace VCX::Labs::FEM {
 
         _selectedPosition.clear();
         _forceLine.clear();
-        if (_selectedParticle < _systems[0].Positions.size()) {
-            for (int s = 0; s < count; ++s) {
-                _selectedPosition.push_back(_systems[s].Positions[_selectedParticle]);
-            }
+        if (_selectedParticle < _system.Positions.size()) {
+            _selectedPosition.push_back(_system.Positions[_selectedParticle]);
             _selectedItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_selectedPosition));
 
             glm::vec3 forceViz = frameControlForce;
             float const len = glm::length(forceViz);
             if (len > 1e-8f) {
                 forceViz *= std::min(1.2f, len * 0.0012f) / len;
-                for (int s = 0; s < count; ++s) {
-                    glm::vec3 const p = _systems[s].Positions[_selectedParticle];
-                    _forceLine.push_back(p);
-                    _forceLine.push_back(p + forceViz);
-                }
+                glm::vec3 const p = _system.Positions[_selectedParticle];
+                _forceLine.push_back(p);
+                _forceLine.push_back(p + forceViz);
                 _forceItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(_forceLine));
             }
         }
@@ -359,7 +309,7 @@ namespace VCX::Labs::FEM {
             0.5f * _size.y,
             0.f,
         };
-        _selectedParticle = _systems[0].FindNearestRestParticle(target);
+        _selectedParticle = _system.FindNearestRestParticle(target);
     }
 
 } // namespace VCX::Labs::FEM

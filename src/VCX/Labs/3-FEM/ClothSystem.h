@@ -32,7 +32,7 @@ namespace VCX::Labs::FEM {
         float PoissonRatio { 0.3f };
         float AreaDensity { 0.5f };
         float Gravity { 9.8f };
-        float VelocityDamping { 0.18f };
+        float VelocityDamping { 0.6f };
         float BendingStiffness { 0.04f };
         float MaxVelocity { 20.f };
 

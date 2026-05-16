@@ -46,7 +46,7 @@ namespace VCX::Labs::FEM {
         bool  _showParticles { false };
         bool  _showFixed { true };
         float _timeStep { 0.001f };
-        int   _stepsPerFrame { 6 };
+        int   _stepsPerFrame { 1 };
 
         std::size_t _selectedParticle { 0 };
         float       _controlForceMagnitude { 12.f };

@@ -205,7 +205,7 @@ namespace VCX::Labs::FEM {
             _system.PoissonRatio = 0.3f;
             _system.AreaDensity = 0.5f;
             _system.Gravity = 9.8f;
-            _system.VelocityDamping = 0.18f;
+            _system.VelocityDamping = 0.6f;
             _system.BendingStiffness = 0.04f;
         }
         _system.ResetSheet(_resolution, _size);
