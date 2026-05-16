@@ -50,7 +50,9 @@ namespace VCX::Labs::FEM {
 
         ImGui::Separator();
         ImGui::Text("Explicit FEM");
-        ImGui::Checkbox("Bonus1: compare 3 materials", &_compareMaterials);
+        if (ImGui::Checkbox("Bonus1: compare 3 materials", &_compareMaterials)) {
+            UpdateStaticBuffers();
+        }
         if (!_compareMaterials) {
             char const * names[] = { "StVK", "Neo-Hookean", "Corotated" };
             if (ImGui::Combo("Material Model", &_activeModel, names, 3)) {
@@ -270,12 +272,19 @@ namespace VCX::Labs::FEM {
             glm::vec3(0.f),
             glm::vec3(_size.x * 0.75f + 1.0f, 0.f, 0.f),
         };
+        bool const firstReset = _systems[0].Positions.empty();
+        float const young = firstReset ? 20000.f : _systems[0].YoungModulus;
+        float const poisson = firstReset ? 0.2f : _systems[0].PoissonRatio;
+        float const density = firstReset ? 400.f : _systems[0].Density;
+        float const gravity = firstReset ? 0.05f : _systems[0].Gravity;
+        float const damping = firstReset ? 1.2f : _systems[0].VelocityDamping;
+
         for (int i = 0; i < 3; ++i) {
-            _systems[i].YoungModulus = 20000.f;
-            _systems[i].PoissonRatio = 0.2f;
-            _systems[i].Density = 400.f;
-            _systems[i].Gravity = 0.05f;
-            _systems[i].VelocityDamping = 1.2f;
+            _systems[i].YoungModulus = young;
+            _systems[i].PoissonRatio = poisson;
+            _systems[i].Density = density;
+            _systems[i].Gravity = gravity;
+            _systems[i].VelocityDamping = damping;
             _systems[i].Model = static_cast<MaterialModel>(i);
             _systems[i].ResetBlock(_resolution, _size, offsets[i]);
         }
