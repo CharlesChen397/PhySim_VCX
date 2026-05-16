@@ -46,7 +46,9 @@ namespace VCX::Labs::FEM {
         bool  _showParticles { false };
         bool  _showFixed { true };
         float _timeStep { 0.001f };
-        int   _stepsPerFrame { 8 };
+        float _simulationSpeed { 3.0f };
+        float _timeAccumulator { 0.f };
+        int   _maxStepsPerFrame { 72 };
         int   _activeModel { 0 };
 
         std::size_t _selectedParticle { 0 };

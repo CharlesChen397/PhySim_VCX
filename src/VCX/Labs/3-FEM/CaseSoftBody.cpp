@@ -55,7 +55,8 @@ namespace VCX::Labs::FEM {
             _system.Model = static_cast<MaterialModel>(_activeModel);
         }
         ImGui::SliderFloat("Time Step", &_timeStep, 0.0002f, 0.003f, "%.4f");
-        ImGui::SliderInt("Steps / Frame", &_stepsPerFrame, 1, 32);
+        ImGui::SliderFloat("Simulation Speed", &_simulationSpeed, 0.1f, 8.0f, "%.1fx");
+        ImGui::SliderInt("Max Steps / Frame", &_maxStepsPerFrame, 8, 160);
         ImGui::SliderFloat("Young Modulus", &_system.YoungModulus, 1000.f, 80000.f, "%.0f");
         ImGui::SliderFloat("Poisson Ratio", &_system.PoissonRatio, 0.0f, 0.45f, "%.2f");
         if (ImGui::SliderFloat("Density", &_system.Density, 50.f, 1000.f, "%.0f")) {
@@ -129,10 +130,22 @@ namespace VCX::Labs::FEM {
         glm::vec3 const frameControlForce = clampForce(_keyboardForce + _mouseForce + _buttonForce, 8000.f);
 
         if (!_stopped) {
-            int const steps = std::max(1, _stepsPerFrame);
-            for (int i = 0; i < steps; ++i) {
+            float const frameDt = std::min(Engine::GetDeltaTime(), 0.05f);
+            _timeAccumulator += frameDt * _simulationSpeed;
+
+            int steps = 0;
+            int const maxSteps = std::max(1, _maxStepsPerFrame);
+            while (_timeAccumulator >= _timeStep && steps < maxSteps) {
                 _system.Step(_timeStep, _selectedParticle, frameControlForce);
+                _timeAccumulator -= _timeStep;
+                ++steps;
             }
+
+            if (steps == maxSteps) {
+                _timeAccumulator = 0.f;
+            }
+        } else {
+            _timeAccumulator = 0.f;
         }
         _buttonForce = glm::vec3(0.f);
 
@@ -243,6 +256,7 @@ namespace VCX::Labs::FEM {
 
     void CaseSoftBody::ResetSystem() {
         _stopped               = true;
+        _timeAccumulator       = 0.f;
         bool const firstReset  = _system.Positions.empty();
         float const young      = firstReset ? 20000.f : _system.YoungModulus;
         float const poisson    = firstReset ? 0.2f : _system.PoissonRatio;

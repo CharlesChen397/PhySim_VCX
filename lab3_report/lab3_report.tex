@@ -1,0 +1,305 @@
+% !TEX program = xelatex
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue
+}
+
+\lstdefinestyle{cppstyle}{
+    language=C++,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue!70!black},
+    commentstyle=\color{green!40!black},
+    stringstyle=\color{orange!70!black},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    breaklines=true,
+    tabsize=4,
+    showstringspaces=false,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+\title{Lab 3 FEM 软体与布料仿真实现报告}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{软体模拟部分说明}
+
+软体模拟的核心代码位于 \texttt{src/VCX/Labs/3-FEM/FEMSystem.h/.cpp} 和
+\texttt{CaseSoftBody.h/.cpp}。系统使用规则长方体网格生成四面体网格，默认尺寸为
+$8\mathrm{m}\times 2\mathrm{m}\times 2\mathrm{m}$，网格分辨率为 $8\times2\times2$。
+每个立方体单元被拆成 6 个四面体；左端 $i=0$ 的顶点固定，其余顶点作为自由质点参与显式积分。
+
+每个四面体在初始化时保存四个顶点索引、Rest Shape 矩阵逆 $\mathbf{D}_m^{-1}$ 和静止体积 $V$。
+其中
+\[
+\mathbf{D}_m =
+\begin{bmatrix}
+\mathbf{X}_1-\mathbf{X}_0 &
+\mathbf{X}_2-\mathbf{X}_0 &
+\mathbf{X}_3-\mathbf{X}_0
+\end{bmatrix},
+\qquad
+V=\frac{|\det(\mathbf{D}_m)|}{6}.
+\]
+质量按体积和密度计算，再平均分配到四面体的四个顶点。固定点质量设为无穷大，并在每步积分时强制回到 Rest Position。
+
+\begin{lstlisting}[style=cppstyle,caption={四面体初始化时记录 Rest Shape 信息}]
+void FEMSystem::AddTet(std::size_t i0, std::size_t i1,
+                       std::size_t i2, std::size_t i3) {
+    glm::mat3 Dm = makeColumnMat(
+        RestPositions[i1] - RestPositions[i0],
+        RestPositions[i2] - RestPositions[i0],
+        RestPositions[i3] - RestPositions[i0]);
+    float det = glm::determinant(Dm);
+    if (det < 0.f) {
+        std::swap(i1, i2);
+        Dm = makeColumnMat(
+            RestPositions[i1] - RestPositions[i0],
+            RestPositions[i2] - RestPositions[i0],
+            RestPositions[i3] - RestPositions[i0]);
+        det = glm::determinant(Dm);
+    }
+
+    Tets.push_back(Tet {
+        .Idx        = { i0, i1, i2, i3 },
+        .InvRest    = glm::inverse(Dm),
+        .RestVolume = std::abs(det) / 6.f,
+    });
+}
+\end{lstlisting}
+
+每一小步仿真先清空力，再加入重力、速度阻尼和用户外力。对每个四面体，当前形状矩阵为
+\[
+\mathbf{D}_s =
+\begin{bmatrix}
+\mathbf{x}_1-\mathbf{x}_0 &
+\mathbf{x}_2-\mathbf{x}_0 &
+\mathbf{x}_3-\mathbf{x}_0
+\end{bmatrix},
+\qquad
+\mathbf{F}=\mathbf{D}_s\mathbf{D}_m^{-1}.
+\]
+基础模型使用 StVK 能量。记
+\[
+\mathbf{G}=\frac{1}{2}(\mathbf{F}^{T}\mathbf{F}-\mathbf{I}),\qquad
+\mathbf{S}=2\mu \mathbf{G}+\lambda \operatorname{tr}(\mathbf{G})\mathbf{I},
+\]
+则 First Piola--Kirchhoff stress 为
+\[
+\mathbf{P}=\mathbf{F}\mathbf{S}.
+\]
+离散力使用
+\[
+\mathbf{H}=-V\mathbf{P}\mathbf{D}_m^{-T}.
+\]
+\texttt{H} 的三列分别加到第 1、2、3 个顶点，第 0 个顶点受到负的列和，从而保证单元内部力守恒。
+
+\begin{lstlisting}[style=cppstyle,caption={由 deformation gradient 计算四面体内力}]
+glm::mat3 const Ds = makeColumnMat(
+    Positions[i1] - Positions[i0],
+    Positions[i2] - Positions[i0],
+    Positions[i3] - Positions[i0]);
+glm::mat3 const F = Ds * tet.InvRest;
+glm::mat3 const P = firstPiola(F, Model, lambda, mu);
+glm::mat3 const H = -tet.RestVolume * P * glm::transpose(tet.InvRest);
+
+Forces[i1] += col(H, 0);
+Forces[i2] += col(H, 1);
+Forces[i3] += col(H, 2);
+Forces[i0] -= col(H, 0) + col(H, 1) + col(H, 2);
+\end{lstlisting}
+
+时间积分采用显式欧拉。自由顶点根据 $\mathbf{a}_i=\mathbf{f}_i/m_i$ 更新速度和位置，并对速度做上限裁剪以避免显式积分在极端参数下数值爆炸。默认物理参数采用作业文档推荐值：杨氏模量 $20000$，泊松比 $0.2$，密度 $400$，重力 $0.05$，阻尼 $1.2$，时间步长 $0.001$。场景默认停止，需要点击 \texttt{Start Simulation} 才开始仿真。
+
+\begin{lstlisting}[style=cppstyle,caption={显式欧拉积分与速度上限}]
+glm::vec3 const accel = Forces[i] / Masses[i];
+Velocities[i] += accel * dt;
+float const speed = glm::length(Velocities[i]);
+if (speed > MaxVelocity) {
+    Velocities[i] *= MaxVelocity / speed;
+}
+Positions[i] += Velocities[i] * dt;
+\end{lstlisting}
+
+为了让仿真速度不直接依赖帧率，软体部分在渲染时使用 \texttt{Engine::GetDeltaTime()} 做时间累积。每帧按照固定小步长 \texttt{\_timeStep} 消耗累积时间，同时通过 \texttt{Max Steps / Frame} 限制单帧最多子步数。
+
+\begin{lstlisting}[style=cppstyle,caption={软体模拟的固定时间步推进}]
+float const frameDt = std::min(Engine::GetDeltaTime(), 0.05f);
+_timeAccumulator += frameDt * _simulationSpeed;
+
+int steps = 0;
+int const maxSteps = std::max(1, _maxStepsPerFrame);
+while (_timeAccumulator >= _timeStep && steps < maxSteps) {
+    _system.Step(_timeStep, _selectedParticle, frameControlForce);
+    _timeAccumulator -= _timeStep;
+    ++steps;
+}
+\end{lstlisting}
+
+\section{B1 说明：多种超弹性模型}
+
+Bonus 1 在同一个软体系统中加入材料模型选择，而不是同时显示多个软体。代码中定义了
+\texttt{MaterialModel} 枚举，并在 UI 中通过 \texttt{Material Model} 下拉框切换
+\texttt{StVK}、\texttt{Neo-Hookean} 和 \texttt{Corotated}。切换后同一个四面体网格会使用新的应力模型计算内力，因此可以在相同几何和交互条件下观察材料行为差异。
+
+\begin{lstlisting}[style=cppstyle,caption={材料模型枚举与 UI 选择}]
+enum class MaterialModel : int {
+    StVK = 0,
+    NeoHookean = 1,
+    Corotated = 2,
+};
+
+char const * names[] = { "StVK", "Neo-Hookean", "Corotated" };
+if (ImGui::Combo("Material Model", &_activeModel, names, 3)) {
+    _system.Model = static_cast<MaterialModel>(_activeModel);
+}
+\end{lstlisting}
+
+三种模型共用同一套四面体离散和力汇总流程，区别只在 \texttt{firstPiola} 函数。StVK 模型使用上一节所述
+$\mathbf{P}=\mathbf{F}\mathbf{S}$。Neo-Hookean 模型使用
+\[
+\mathbf{P}
+= \mu(\mathbf{F}-\mathbf{F}^{-T})
+  + \lambda \log(J)\mathbf{F}^{-T},
+\qquad J=\det(\mathbf{F}).
+\]
+实现中对 $J$ 做了最小值裁剪，避免单元翻转或过度压缩时 $\log(J)$ 和逆矩阵产生非法值。
+
+Corotated 模型先对 $\mathbf{F}$ 做极分解，取旋转部分 $\mathbf{R}$，再使用
+\[
+\mathbf{P}
+= 2\mu(\mathbf{F}-\mathbf{R})
+  + \lambda (J-1)J\mathbf{F}^{-T}.
+\]
+极分解通过 Eigen 的 SVD 实现，并在 $\det(\mathbf{R})<0$ 时修正一列奇异向量，保证得到合法旋转矩阵。
+
+\begin{lstlisting}[style=cppstyle,caption={三种材料模型的 First Piola stress}]
+glm::mat3 firstPiola(glm::mat3 const & F,
+                     MaterialModel model,
+                     float lambda,
+                     float mu) {
+    if (model == MaterialModel::NeoHookean) {
+        float const J = std::max(glm::determinant(F), 1e-4f);
+        glm::mat3 const FinvT = glm::transpose(glm::inverse(F));
+        return mu * (F - FinvT) + lambda * std::log(J) * FinvT;
+    }
+
+    if (model == MaterialModel::Corotated) {
+        glm::mat3 const R = polarRotation(F);
+        float const J = glm::determinant(F);
+        return 2.f * mu * (F - R)
+             + lambda * (J - 1.f) * J * glm::transpose(glm::inverse(F));
+    }
+
+    glm::mat3 const C = glm::transpose(F) * F;
+    glm::mat3 const G = 0.5f * (C - glm::mat3(1.f));
+    glm::mat3 const S = 2.f * mu * G
+                      + lambda * traceMat(G) * glm::mat3(1.f);
+    return F * S;
+}
+\end{lstlisting}
+
+\section{B2 说明：布料模拟}
+
+Bonus 2 的布料代码位于 \texttt{ClothSystem.h/.cpp} 和 \texttt{CaseCloth.h/.cpp}。布料被建模为嵌入三维空间的二维三角形网格，默认分辨率为 $24\times24$，尺寸为 $2\mathrm{m}\times2\mathrm{m}$。网格初始位于 $xz$ 平面上方，左侧两个角固定，其余顶点自由运动。
+
+和三维软体不同，布料单个三角形的 Rest Shape 只需要二维坐标描述。初始化时为每个顶点保存三维位置 \texttt{RestPositions} 和二维参数坐标 \texttt{RestUV}。每个三角形保存
+\[
+\mathbf{D}_m =
+\begin{bmatrix}
+\mathbf{u}_1-\mathbf{u}_0 &
+\mathbf{u}_2-\mathbf{u}_0
+\end{bmatrix},
+\qquad
+A=\frac{|\det(\mathbf{D}_m)|}{2}.
+\]
+质量根据面密度和三角形面积分配到三个顶点，默认参数使用文档建议值：杨氏模量 $50$，泊松比 $0.3$，面密度 $0.5$，重力 $9.8$，时间步长 $0.001$。为了让默认演示更稳定，速度阻尼设为 $0.6$，默认每帧只推进 1 个子步；需要更快运动时可以手动增加 \texttt{Steps / Frame}。
+
+布料的当前形状矩阵为 $3\times2$：
+\[
+\mathbf{D}_s =
+\begin{bmatrix}
+\mathbf{x}_1-\mathbf{x}_0 &
+\mathbf{x}_2-\mathbf{x}_0
+\end{bmatrix},
+\qquad
+\mathbf{F}=\mathbf{D}_s\mathbf{D}_m^{-1}.
+\]
+随后在二维参数域中计算
+\[
+\mathbf{C}=\mathbf{F}^{T}\mathbf{F},\qquad
+\mathbf{G}=\frac{1}{2}(\mathbf{C}-\mathbf{I}_2),
+\]
+\[
+\mathbf{S}=2\mu\mathbf{G}+\lambda\operatorname{tr}(\mathbf{G})\mathbf{I}_2,
+\qquad
+\mathbf{P}=\mathbf{F}\mathbf{S}.
+\]
+离散力矩阵为
+\[
+\mathbf{H}=-A\mathbf{P}\mathbf{D}_m^{-T}.
+\]
+\texttt{H} 是 $3\times2$ 矩阵，其两列分别给三角形第 1、2 个顶点，第 0 个顶点受到负列和。
+
+\begin{lstlisting}[style=cppstyle,caption={布料三角形的 3x2 FEM 内力}]
+glm::mat2x3 const Ds(
+    Positions[i1] - Positions[i0],
+    Positions[i2] - Positions[i0]);
+glm::mat2x3 const F = Ds * tri.InvRest;
+glm::mat2 const C = glm::transpose(F) * F;
+glm::mat2 const G = 0.5f * (C - glm::mat2(1.f));
+glm::mat2 const S = 2.f * mu * G
+                  + lambda * traceMat(G) * glm::mat2(1.f);
+glm::mat2x3 const P = F * S;
+glm::mat2x3 const H = -tri.RestArea * P
+                    * glm::transpose(tri.InvRest);
+
+glm::vec3 const f1 = mat2x3Col0(H);
+glm::vec3 const f2 = mat2x3Col1(H);
+Forces[i1] += f1;
+Forces[i2] += f2;
+Forces[i0] -= f1 + f2;
+\end{lstlisting}
+
+除了面内 FEM 弹性力，布料还加入了简单的弯曲弹簧。实现上对横向或纵向相隔两个网格点的顶点建立 \texttt{BendEdge}，保存静止长度。每步对这些边施加 Hooke 型长度恢复力，用于减小布料过度折叠和数值抖动。
+
+\begin{lstlisting}[style=cppstyle,caption={布料弯曲弹簧}]
+glm::vec3 const x = Positions[edge.I1] - Positions[edge.I0];
+float const len = glm::length(x);
+if (len > 1e-7f) {
+    glm::vec3 const dir = x / len;
+    glm::vec3 const f = BendingStiffness
+                      * (len - edge.RestLength) * dir;
+    if (!Fixed[edge.I0]) Forces[edge.I0] += f;
+    if (!Fixed[edge.I1]) Forces[edge.I1] -= f;
+}
+\end{lstlisting}
+
+\section{交互方式指南}
+
+\begin{itemize}[leftmargin=*]
+    \item 构建运行：在仓库根目录执行 \texttt{xmake run lab3}。
+    \item 软体材料：软体场景中通过 \texttt{Material Model} 下拉框切换 \texttt{StVK}、\texttt{Neo-Hookean}、\texttt{Corotated}。
+    \item 选择控制点：\texttt{Control Particle} 滑条可以选择任意顶点；软体的 \texttt{Select Free End} 会自动选择自由端顶点，布料的 \texttt{Select Free Corner} 会自动选择自由角点。
+    \item 键盘施力：画面获得焦点后，\texttt{J/L} 沿 $-X/+X$ 方向施力，\texttt{U/O} 沿 $+Y/-Y$ 方向施力，\texttt{I/K} 沿 $-Z/+Z$ 方向施力。
+    \item 鼠标拖拽：按住 \texttt{Z + 鼠标左键} 并拖动画面，可以在当前相机视平面内对选中顶点施加外力。拖拽强度由 \texttt{Mouse Force Scale} 控制。
+    \item 按钮施力：UI 中的 \texttt{+X/-X/+Y/-Y/+Z/-Z} 按钮会对当前选中顶点施加一次方向力，大小由 \texttt{Control Force} 控制。
+    \item 可视化：黄色大点表示当前选中的控制顶点；红色点表示固定顶点；\texttt{Surface}、\texttt{Wireframe}、\texttt{Particles}、\texttt{Fixed Points} 可分别控制表面、线框、粒子和固定点显示。
+\end{itemize}
+
+\end{document}
